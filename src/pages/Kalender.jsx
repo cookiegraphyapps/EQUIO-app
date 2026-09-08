@@ -1,18 +1,12 @@
 import { useEffect, useState } from "react";
 import { ChevronLeft, ChevronRight, Plus } from "lucide-react";
 import { supabase } from "../supabaseClient";
-import { SectionTitle, IconBtn, Modal, COLOR, todayISO, fmtDate, inputStyle, labelStyle, btnPrimary, btnGhost, navBtn } from "../components/ui";
+import { SectionTitle, IconBtn, Modal, COLOR, todayISO, addMonths, dateToISO, parseISODate, fmtDate, inputStyle, labelStyle, btnPrimary, btnGhost, navBtn } from "../components/ui";
 
 const WEEKDAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 
-function addMonths(iso, n) {
-  const d = new Date(iso);
-  d.setMonth(d.getMonth() + n);
-  return d.toISOString().slice(0, 10);
-}
-
 function monthGrid(cursorIso) {
-  const c = new Date(cursorIso);
+  const c = parseISODate(cursorIso);
   const year = c.getFullYear();
   const month = c.getMonth();
   const first = new Date(year, month, 1);
@@ -26,7 +20,7 @@ function monthGrid(cursorIso) {
   const days = [];
   const cur = new Date(gridStart);
   while (cur <= gridEnd) {
-    days.push(cur.toISOString().slice(0, 10));
+    days.push(dateToISO(cur));
     cur.setDate(cur.getDate() + 1);
   }
   const weeks = [];
@@ -136,7 +130,7 @@ export default function Kalender({ user }) {
       {grid.weeks.map((week, wi) => (
         <div key={wi} style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 2, marginBottom: 2 }}>
           {week.map((d) => {
-            const inMonth = new Date(d).getMonth() === grid.month;
+            const inMonth = parseISODate(d).getMonth() === grid.month;
             const isToday = d === todayISO();
             const isSelected = d === selectedDay;
             const dayEntries = entriesForDay(d);

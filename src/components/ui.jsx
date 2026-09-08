@@ -36,16 +36,27 @@ export const TASK_TYPES = {
   info: "Information / Termin",
 };
 
-export function todayISO() { const d = new Date(); return d.toISOString().slice(0, 10); }
-export function addDays(iso, n) { const d = new Date(iso); d.setDate(d.getDate() + n); return d.toISOString().slice(0, 10); }
-export function addMonths(iso, n) { const d = new Date(iso); d.setMonth(d.getMonth() + n); return d.toISOString().slice(0, 10); }
+function pad2(n) { return String(n).padStart(2, "0"); }
+// Wandelt ein Date-Objekt in einen "YYYY-MM-DD"-String anhand der LOKALEN Zeit um
+// (nie toISOString() für Datums-Strings verwenden – das rechnet in UTC und
+// verschiebt bei Zeitzonen wie Deutschland (UTC+1/+2) das Datum leicht daneben).
+export function dateToISO(d) { return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`; }
+export function parseISODate(iso) {
+  const [y, m, day] = iso.split("-").map(Number);
+  return new Date(y, m - 1, day); // lokale Mitternacht, kein UTC-String-Parsing
+}
+const parseISO = parseISODate;
+
+export function todayISO() { return dateToISO(new Date()); }
+export function addDays(iso, n) { const d = parseISO(iso); d.setDate(d.getDate() + n); return dateToISO(d); }
+export function addMonths(iso, n) { const d = parseISO(iso); d.setMonth(d.getMonth() + n); return dateToISO(d); }
 export function fmtDate(iso) {
   if (!iso) return "";
-  const d = new Date(iso + "T00:00:00");
+  const d = parseISO(iso);
   return d.toLocaleDateString("de-DE", { weekday: "short", day: "2-digit", month: "2-digit" });
 }
 export function daysUntil(iso) {
-  const a = new Date(todayISO()); const b = new Date(iso);
+  const a = parseISO(todayISO()); const b = parseISO(iso);
   return Math.round((b - a) / 86400000);
 }
 // Nächster Fälligkeitstermin: direkt gesetztes Datum (item.next) hat Vorrang,
