@@ -1,6 +1,6 @@
-import { useEffect, useState } from "react";
-import { ChevronLeft, Syringe, Scissors, Stethoscope, Pill as PillIcon, Dumbbell, Plus, HeartPulse, Wheat } from "lucide-react";
-import { supabase } from "../supabaseClient";
+import { useEffect, useRef, useState } from "react";
+import { ChevronLeft, Syringe, Scissors, Stethoscope, Pill as PillIcon, Dumbbell, Plus, HeartPulse, Wheat, Pencil, Camera, X } from "lucide-react";
+import { supabase, uploadPhoto } from "../supabaseClient";
 import { Card, SectionTitle, Empty, Pill, Modal, IconBtn, COLOR, fmtDate, daysUntil, nextDue, HEALTH_LABELS, HEALTH_DEFAULT_INTERVAL, inputStyle, labelStyle, btnPrimary, btnGhost, navBtn, todayISO } from "../components/ui";
 
 const ICONS = { impfung: Syringe, hufschmied: Scissors, zahnarzt: Stethoscope, entwurmung: PillIcon };
@@ -10,6 +10,8 @@ export default function Pferde({ user }) {
   const [loading, setLoading] = useState(true);
   const [horses, setHorses] = useState([]);
   const [open, setOpen] = useState(null);
+  const [showAddHorse, setShowAddHorse] = useState(false);
+  const [addHorseError, setAddHorseError] = useState("");
 
   const load = async () => {
     const { data } = await supabase.from("horses").select("*").order("name");
@@ -17,6 +19,19 @@ export default function Pferde({ user }) {
     setLoading(false);
   };
   useEffect(() => { load(); }, []);
+
+  const addHorse = async (data) => {
+    setAddHorseError("");
+    const { error } = await supabase.from("horses").insert({
+      name: data.name, breed: data.breed || null, born: data.born || null, owner: data.owner || null, note: data.note || null, health: {},
+    });
+    if (error) {
+      setAddHorseError(error.code === "23505" ? "Ein Pferd mit diesem Namen gibt es schon." : "Konnte nicht gespeichert werden.");
+      return;
+    }
+    setShowAddHorse(false);
+    load();
+  };
 
   if (loading) return <Empty text="Lädt …" />;
 
@@ -27,8 +42,14 @@ export default function Pferde({ user }) {
         horse={horse}
         user={user}
         onBack={() => setOpen(null)}
-        onSave={async (h) => {
-          await supabase.from("horses").update({ health: h.health }).eq("id", h.id);
+        onSave={async (updates) => {
+          const { error } = await supabase.from("horses").update(updates).eq("id", horse.id);
+          load();
+          return error;
+        }}
+        onDelete={async () => {
+          await supabase.from("horses").delete().eq("id", horse.id);
+          setOpen(null);
           load();
         }}
       />
@@ -37,12 +58,14 @@ export default function Pferde({ user }) {
 
   return (
     <div>
-      <SectionTitle>Pferde</SectionTitle>
+      <SectionTitle right={<IconBtn onClick={() => setShowAddHorse(true)}><Plus size={15} /> Pferd</IconBtn>}>Pferde</SectionTitle>
       {horses.map((h) => {
         const urgent = Object.entries(h.health || {}).filter(([k]) => HEALTH_LABELS[k]).map(([, v]) => daysUntil(nextDue(v))).sort((a, b) => a - b)[0];
         return (
           <Card key={h.id} onClick={() => setOpen(h.id)} style={{ marginBottom: 10, cursor: "pointer", display: "flex", alignItems: "center", gap: 12 }}>
-            <div style={{ width: 42, height: 42, borderRadius: "50%", background: "#F3ECDD", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 20 }}>🐴</div>
+            <div style={{ width: 42, height: 42, borderRadius: "50%", background: "#F3ECDD", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 20, overflow: "hidden", flexShrink: 0 }}>
+              {h.photo_url ? <img src={h.photo_url} alt={h.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : "🐴"}
+            </div>
             <div style={{ flex: 1 }}>
               <div style={{ fontWeight: 700, fontSize: 15, color: COLOR.ink }}>{h.name}</div>
               <div style={{ fontSize: 12, color: COLOR.inkSoft }}>{h.breed} · {h.owner}</div>
@@ -55,12 +78,47 @@ export default function Pferde({ user }) {
           </Card>
         );
       })}
+      {showAddHorse && <AddHorseModal error={addHorseError} onClose={() => setShowAddHorse(false)} onSave={addHorse} />}
     </div>
   );
 }
 
-function PferdDetail({ horse, user, onBack, onSave }) {
+function AddHorseModal({ error, onClose, onSave }) {
+  const [name, setName] = useState("");
+  const [breed, setBreed] = useState("");
+  const [born, setBorn] = useState("");
+  const [owner, setOwner] = useState("");
+  const [note, setNote] = useState("");
+  return (
+    <Modal title="Neues Pferd" onClose={onClose}>
+      <label style={labelStyle}>Name</label>
+      <input style={inputStyle} value={name} onChange={(e) => setName(e.target.value)} placeholder="z. B. Luna" />
+      <label style={labelStyle}>Rasse (optional)</label>
+      <input style={inputStyle} value={breed} onChange={(e) => setBreed(e.target.value)} />
+      <label style={labelStyle}>Geburtsjahr (optional)</label>
+      <input style={inputStyle} value={born} onChange={(e) => setBorn(e.target.value)} placeholder="z. B. 2015" />
+      <label style={labelStyle}>Besitzer:in (optional)</label>
+      <input style={inputStyle} value={owner} onChange={(e) => setOwner(e.target.value)} />
+      <label style={labelStyle}>Notiz (optional)</label>
+      <input style={inputStyle} value={note} onChange={(e) => setNote(e.target.value)} />
+      {error && <div style={{ fontSize: 12.5, color: COLOR.dringend, marginBottom: 8 }}>{error}</div>}
+      <button
+        disabled={!name.trim()}
+        onClick={() => onSave({ name: name.trim(), breed: breed.trim(), born: born.trim(), owner: owner.trim(), note: note.trim() })}
+        style={{ ...btnPrimary, width: "100%", padding: "11px 0", opacity: name.trim() ? 1 : 0.5 }}
+      >Pferd anlegen</button>
+    </Modal>
+  );
+}
+
+function PferdDetail({ horse, user, onBack, onSave, onDelete }) {
   const [editKey, setEditKey] = useState(null);
+  const [editingInfo, setEditingInfo] = useState(false);
+  const [confirmDeleteHorse, setConfirmDeleteHorse] = useState(false);
+  const [infoBreed, setInfoBreed] = useState(horse.breed || "");
+  const [infoBorn, setInfoBorn] = useState(horse.born || "");
+  const [infoOwner, setInfoOwner] = useState(horse.owner || "");
+  const [infoNote, setInfoNote] = useState(horse.note || "");
   const [trainings, setTrainings] = useState([]);
   const [plans, setPlans] = useState([]);
   const [showNewTraining, setShowNewTraining] = useState(false);
@@ -71,20 +129,77 @@ function PferdDetail({ horse, user, onBack, onSave }) {
   const [feedPlan, setFeedPlan] = useState(horse.feed_plan || "");
   const [editingFeedPlan, setEditingFeedPlan] = useState(false);
   const [savingFeedPlan, setSavingFeedPlan] = useState(false);
+  const [photos, setPhotos] = useState([]);
+  const [uploadingProfilePic, setUploadingProfilePic] = useState(false);
+  const [uploadingGalleryPic, setUploadingGalleryPic] = useState(false);
+  const [viewerPhoto, setViewerPhoto] = useState(null);
+  const profilePicInput = useRef(null);
+  const galleryPicInput = useRef(null);
+
+  const loadPhotos = async () => {
+    const { data } = await supabase.from("horse_photos").select("*").eq("horse_id", horse.id).order("created_at", { ascending: false });
+    setPhotos(data ?? []);
+  };
+
+  const onProfilePicChange = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploadingProfilePic(true);
+    try {
+      const url = await uploadPhoto(file, `${horse.id}/profile`);
+      onSave({ photo_url: url });
+    } finally {
+      setUploadingProfilePic(false);
+      e.target.value = "";
+    }
+  };
+
+  const onGalleryPicChange = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploadingGalleryPic(true);
+    try {
+      const url = await uploadPhoto(file, `${horse.id}/gallery`);
+      await supabase.from("horse_photos").insert({ horse_id: horse.id, url, user_name: user });
+      loadPhotos();
+    } finally {
+      setUploadingGalleryPic(false);
+      e.target.value = "";
+    }
+  };
+
+  const usePhotoAsProfile = (url) => {
+    onSave({ photo_url: url });
+    setViewerPhoto(null);
+  };
+
+  const deletePhoto = async (photoId) => {
+    await supabase.from("horse_photos").delete().eq("id", photoId);
+    setViewerPhoto(null);
+    loadPhotos();
+  };
 
   const loadHealthNotes = async () => {
     const { data } = await supabase.from("health_notes").select("*").eq("horse_id", horse.id).order("date", { ascending: false });
     setHealthNotes(data ?? []);
   };
   const addHealthNote = async (n) => {
-    await supabase.from("health_notes").insert({ horse_id: horse.id, user_name: user, date: n.date, note: n.note });
+    let photoUrl = null;
+    if (n.photoFile) photoUrl = await uploadPhoto(n.photoFile, `${horse.id}/health-notes`);
+    await supabase.from("health_notes").insert({ horse_id: horse.id, user_name: user, date: n.date, note: n.note, photo_url: photoUrl });
     setShowNewHealthNote(false);
     loadHealthNotes();
   };
+  const [feedPlanError, setFeedPlanError] = useState("");
   const saveFeedPlan = async () => {
     setSavingFeedPlan(true);
-    await supabase.from("horses").update({ feed_plan: feedPlan }).eq("id", horse.id);
+    setFeedPlanError("");
+    const error = await onSave({ feed_plan: feedPlan });
     setSavingFeedPlan(false);
+    if (error) {
+      setFeedPlanError("Konnte nicht gespeichert werden – bitte sicherstellen, dass die Datenbank auf dem neuesten Stand ist (aktuelles SQL-Skript ausgeführt).");
+      return;
+    }
     setEditingFeedPlan(false);
   };
 
@@ -99,6 +214,7 @@ function PferdDetail({ horse, user, onBack, onSave }) {
   useEffect(() => {
     loadTrainings();
     loadHealthNotes();
+    loadPhotos();
     supabase.auth.getUser().then(({ data }) => {
       const currentUid = data?.user?.id;
       setUid(currentUid);
@@ -121,21 +237,67 @@ function PferdDetail({ horse, user, onBack, onSave }) {
   const setLast = (key, date) => {
     const existing = horse.health?.[key];
     const interval = existing?.interval ?? HEALTH_DEFAULT_INTERVAL[key];
-    onSave({ ...horse, health: { ...horse.health, [key]: { last: date, interval } } });
+    onSave({ health: { ...horse.health, [key]: { last: date, interval } } });
     setEditKey(null);
+  };
+
+  const saveInfo = () => {
+    onSave({ breed: infoBreed.trim() || null, born: infoBorn.trim() || null, owner: infoOwner.trim() || null, note: infoNote.trim() || null });
+    setEditingInfo(false);
   };
   return (
     <div>
       <button onClick={onBack} style={{ ...navBtn, marginTop: 14, display: "flex", alignItems: "center", gap: 4 }}><ChevronLeft size={15} /> Pferde</button>
       <div style={{ textAlign: "center", margin: "16px 0" }}>
-        <div style={{ fontSize: 40 }}>🐴</div>
-        <div style={{ fontFamily: "Fraunces, serif", fontSize: 22, fontWeight: 700, color: COLOR.ink }}>{horse.name}</div>
-        {(horse.breed || horse.born || horse.owner) && (
-          <div style={{ fontSize: 13, color: COLOR.inkSoft }}>
-            {[horse.breed, horse.born && `geb. ${horse.born}`, horse.owner && `Besitzer:in ${horse.owner}`].filter(Boolean).join(" · ")}
+        <div style={{ position: "relative", width: 84, height: 84, margin: "0 auto" }}>
+          <div style={{
+            width: 84, height: 84, borderRadius: "50%", background: "#F3ECDD", display: "flex", alignItems: "center",
+            justifyContent: "center", fontSize: 40, overflow: "hidden",
+          }}>
+            {horse.photo_url ? <img src={horse.photo_url} alt={horse.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : "🐴"}
           </div>
+          <button
+            onClick={() => profilePicInput.current?.click()}
+            disabled={uploadingProfilePic}
+            style={{
+              position: "absolute", bottom: -2, right: -2, width: 28, height: 28, borderRadius: "50%",
+              background: COLOR.ink, border: "2px solid #fff", color: "#fff", display: "flex",
+              alignItems: "center", justifyContent: "center", cursor: "pointer",
+            }}
+          >
+            <Camera size={13} />
+          </button>
+          <input ref={profilePicInput} type="file" accept="image/*" style={{ display: "none" }} onChange={onProfilePicChange} />
+        </div>
+        <div style={{ fontFamily: "Fraunces, serif", fontSize: 22, fontWeight: 700, color: COLOR.ink, marginTop: 8 }}>{horse.name}</div>
+        {editingInfo ? (
+          <div style={{ textAlign: "left", maxWidth: 320, margin: "10px auto 0" }}>
+            <label style={labelStyle}>Rasse</label>
+            <input style={inputStyle} value={infoBreed} onChange={(e) => setInfoBreed(e.target.value)} />
+            <label style={labelStyle}>Geburtsjahr</label>
+            <input style={inputStyle} value={infoBorn} onChange={(e) => setInfoBorn(e.target.value)} />
+            <label style={labelStyle}>Besitzer:in</label>
+            <input style={inputStyle} value={infoOwner} onChange={(e) => setInfoOwner(e.target.value)} />
+            <label style={labelStyle}>Notiz</label>
+            <input style={inputStyle} value={infoNote} onChange={(e) => setInfoNote(e.target.value)} />
+            <div style={{ display: "flex", gap: 8 }}>
+              <button style={{ ...btnPrimary, flex: 1 }} onClick={saveInfo}>Speichern</button>
+              <button style={{ ...btnGhost, flex: 1 }} onClick={() => setEditingInfo(false)}>Abbrechen</button>
+            </div>
+          </div>
+        ) : (
+          <>
+            {(horse.breed || horse.born || horse.owner) && (
+              <div style={{ fontSize: 13, color: COLOR.inkSoft }}>
+                {[horse.breed, horse.born && `geb. ${horse.born}`, horse.owner && `Besitzer:in ${horse.owner}`].filter(Boolean).join(" · ")}
+              </div>
+            )}
+            {horse.note && <div style={{ fontSize: 12.5, color: COLOR.inkSoft, marginTop: 6, fontStyle: "italic" }}>{horse.note}</div>}
+            <button onClick={() => setEditingInfo(true)} style={{ background: "none", border: "none", cursor: "pointer", color: COLOR.inkSoft, marginTop: 6, fontSize: 11.5, display: "inline-flex", alignItems: "center", gap: 4 }}>
+              <Pencil size={11} /> Basisdaten bearbeiten
+            </button>
+          </>
         )}
-        {horse.note && <div style={{ fontSize: 12.5, color: COLOR.inkSoft, marginTop: 6, fontStyle: "italic" }}>{horse.note}</div>}
       </div>
       <SectionTitle>Gesundheit & Pflege</SectionTitle>
       {Object.keys(HEALTH_LABELS).map((k) => {
@@ -179,8 +341,17 @@ function PferdDetail({ horse, user, onBack, onSave }) {
       {healthNotes.length === 0 && <Empty text="Noch keine Notizen." />}
       {healthNotes.map((n) => (
         <Card key={n.id} style={{ marginBottom: 8 }}>
-          <div style={{ fontSize: 11.5, color: COLOR.inkSoft }}>{fmtDate(n.date)} · {n.user_name}</div>
-          <div style={{ fontSize: 13.5, color: COLOR.ink, marginTop: 2 }}>{n.note}</div>
+          <div style={{ display: "flex", gap: 10 }}>
+            {n.photo_url && (
+              <button onClick={() => setViewerPhoto({ url: n.photo_url })} style={{ border: "none", padding: 0, cursor: "pointer", width: 52, height: 52, borderRadius: 8, overflow: "hidden", flexShrink: 0, background: "#F3ECDD" }}>
+                <img src={n.photo_url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+              </button>
+            )}
+            <div>
+              <div style={{ fontSize: 11.5, color: COLOR.inkSoft }}>{fmtDate(n.date)} · {n.user_name}</div>
+              <div style={{ fontSize: 13.5, color: COLOR.ink, marginTop: 2 }}>{n.note}</div>
+            </div>
+          </div>
         </Card>
       ))}
 
@@ -191,9 +362,10 @@ function PferdDetail({ horse, user, onBack, onSave }) {
         {editingFeedPlan ? (
           <>
             <textarea style={{ ...inputStyle, minHeight: 90 }} value={feedPlan} onChange={(e) => setFeedPlan(e.target.value)} placeholder="z. B. morgens 1 Schöpfer Müsli + Heu nach Bedarf …" />
+            {feedPlanError && <div style={{ fontSize: 12, color: COLOR.dringend, marginBottom: 8 }}>{feedPlanError}</div>}
             <div style={{ display: "flex", gap: 8 }}>
               <button style={btnPrimary} disabled={savingFeedPlan} onClick={saveFeedPlan}>Speichern</button>
-              <button style={btnGhost} onClick={() => { setFeedPlan(horse.feed_plan || ""); setEditingFeedPlan(false); }}>Abbrechen</button>
+              <button style={btnGhost} onClick={() => { setFeedPlan(horse.feed_plan || ""); setEditingFeedPlan(false); setFeedPlanError(""); }}>Abbrechen</button>
             </div>
           </>
         ) : (
@@ -232,6 +404,63 @@ function PferdDetail({ horse, user, onBack, onSave }) {
       {showNewTraining && <NewTrainingModal onClose={() => setShowNewTraining(false)} onSave={addTraining} />}
       {showNewPlan && <NewPlanModal onClose={() => setShowNewPlan(false)} onSave={addPlan} />}
       {showNewHealthNote && <NewHealthNoteModal onClose={() => setShowNewHealthNote(false)} onSave={addHealthNote} />}
+
+      <SectionTitle right={<IconBtn onClick={() => galleryPicInput.current?.click()}><Plus size={15} /> Foto</IconBtn>}>
+        <Camera size={15} style={{ marginRight: 5, verticalAlign: -2 }} />Galerie
+      </SectionTitle>
+      <input ref={galleryPicInput} type="file" accept="image/*" style={{ display: "none" }} onChange={onGalleryPicChange} />
+      {uploadingGalleryPic && <div style={{ fontSize: 12, color: COLOR.inkSoft, marginBottom: 8 }}>Foto wird hochgeladen …</div>}
+      {photos.length === 0 && !uploadingGalleryPic && <Empty text="Noch keine Fotos." />}
+      {photos.length > 0 && (
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 6, marginBottom: 4 }}>
+          {photos.map((p) => (
+            <button key={p.id} onClick={() => setViewerPhoto(p)} style={{ border: "none", padding: 0, cursor: "pointer", aspectRatio: "1", borderRadius: 8, overflow: "hidden", background: "#F3ECDD" }}>
+              <img src={p.url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+            </button>
+          ))}
+        </div>
+      )}
+
+      {viewerPhoto && (
+        <PhotoViewerModal
+          photo={viewerPhoto}
+          onClose={() => setViewerPhoto(null)}
+          onUseAsProfile={viewerPhoto.id ? () => usePhotoAsProfile(viewerPhoto.url) : null}
+          onDelete={viewerPhoto.id ? () => deletePhoto(viewerPhoto.id) : null}
+        />
+      )}
+
+      <div style={{ marginTop: 24, textAlign: "center" }}>
+        {confirmDeleteHorse ? (
+          <div style={{ display: "flex", gap: 8, justifyContent: "center" }}>
+            <button onClick={onDelete} style={{ ...btnPrimary, background: COLOR.dringend }}>Wirklich löschen</button>
+            <button onClick={() => setConfirmDeleteHorse(false)} style={btnGhost}>Abbrechen</button>
+          </div>
+        ) : (
+          <button onClick={() => setConfirmDeleteHorse(true)} style={{ background: "none", border: "none", cursor: "pointer", color: COLOR.dringend, fontSize: 12 }}>
+            {horse.name} entfernen
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function PhotoViewerModal({ photo, onClose, onUseAsProfile, onDelete }) {
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(20,20,15,0.9)", zIndex: 100, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: 20 }}>
+      <button onClick={onClose} style={{ position: "absolute", top: 16, right: 16, background: "none", border: "none", color: "#fff", cursor: "pointer" }}>
+        <X size={24} />
+      </button>
+      <img src={photo.url} alt="" style={{ maxWidth: "100%", maxHeight: "70vh", borderRadius: 10, objectFit: "contain" }} />
+      {(onUseAsProfile || onDelete) && (
+        <div style={{ display: "flex", gap: 10, marginTop: 16 }}>
+          {onUseAsProfile && <button onClick={onUseAsProfile} style={{ ...btnPrimary }}>Als Profilbild verwenden</button>}
+          {onDelete && !confirmDelete && <button onClick={() => setConfirmDelete(true)} style={{ ...btnGhost, color: "#fff", borderColor: "#fff" }}>Löschen</button>}
+          {onDelete && confirmDelete && <button onClick={onDelete} style={{ ...btnPrimary, background: COLOR.dringend }}>Wirklich löschen?</button>}
+        </div>
+      )}
     </div>
   );
 }
@@ -273,15 +502,34 @@ function NewTrainingModal({ onClose, onSave }) {
 function NewHealthNoteModal({ onClose, onSave }) {
   const [date, setDate] = useState(todayISO());
   const [note, setNote] = useState("");
+  const [photoFile, setPhotoFile] = useState(null);
+  const [photoPreview, setPhotoPreview] = useState(null);
+
+  const onPhotoChange = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setPhotoFile(file);
+    setPhotoPreview(URL.createObjectURL(file));
+  };
+
   return (
     <Modal title="Gesundheitsnotiz" onClose={onClose}>
       <label style={labelStyle}>Datum</label>
       <input type="date" style={inputStyle} value={date} onChange={(e) => setDate(e.target.value)} />
       <label style={labelStyle}>Notiz (z. B. "steifes Becken", "leichter Husten")</label>
       <textarea style={{ ...inputStyle, minHeight: 70 }} value={note} onChange={(e) => setNote(e.target.value)} />
+      <label style={labelStyle}>Foto (optional)</label>
+      {photoPreview ? (
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
+          <img src={photoPreview} alt="" style={{ width: 56, height: 56, borderRadius: 8, objectFit: "cover" }} />
+          <button type="button" onClick={() => { setPhotoFile(null); setPhotoPreview(null); }} style={btnGhost}>Entfernen</button>
+        </div>
+      ) : (
+        <input type="file" accept="image/*" onChange={onPhotoChange} style={{ marginBottom: 12, fontSize: 12.5 }} />
+      )}
       <button
         disabled={!note.trim()}
-        onClick={() => onSave({ date, note: note.trim() })}
+        onClick={() => onSave({ date, note: note.trim(), photoFile })}
         style={{ ...btnPrimary, width: "100%", padding: "11px 0", opacity: !note.trim() ? 0.5 : 1 }}
       >Speichern</button>
     </Modal>

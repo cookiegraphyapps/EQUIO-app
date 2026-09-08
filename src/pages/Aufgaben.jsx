@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { AlertTriangle, CheckCircle2, Plus, Repeat } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Plus, Repeat, Pencil } from "lucide-react";
 import { supabase } from "../supabaseClient";
 import {
   Card, SectionTitle, Empty, Pill, Modal, IconBtn, COLOR,
@@ -13,6 +13,7 @@ export default function Aufgaben({ user }) {
   const [people, setPeople] = useState([]);
   const [showNew, setShowNew] = useState(false);
   const [showAbsence, setShowAbsence] = useState(false);
+  const [editTask, setEditTask] = useState(null);
 
   const load = async () => {
     const [tasksRes, horsesRes, peopleRes] = await Promise.all([
@@ -31,8 +32,8 @@ export default function Aufgaben({ user }) {
   if (loading) return <Empty text="Lädt …" />;
 
   const t = todayISO();
-  const upcoming = tasks.filter((x) => x.date >= t);
-  const past = tasks.filter((x) => x.date < t).slice(-5);
+  const upcoming = tasks.filter((x) => (x.date_end || x.date) >= t);
+  const past = tasks.filter((x) => (x.date_end || x.date) < t).slice(-5);
 
   const uebernehmen = async (task) => {
     const done = task.type === "uebernahme";
@@ -51,14 +52,15 @@ export default function Aufgaben({ user }) {
   const addTask = async (data) => {
     const doneIfAssigned = !!data.assignTo && data.type === "uebernahme";
     const rows = [];
-    if (data.recurring && data.recurEnd) {
+    if (data.mode === "recurring" && data.recurEnd) {
       let d = data.date;
       while (d <= data.recurEnd) {
-        rows.push({ title: data.title, description: data.desc, type: data.type, date: d, time: data.time || null, horse_ids: data.horseIds, recurring: true, assigned_user: data.assignTo || null, done: doneIfAssigned });
+        rows.push({ title: data.title, description: data.desc, type: data.type, date: d, date_end: null, time: data.time || null, horse_ids: data.horseIds, recurring: true, assigned_user: data.assignTo || null, done: doneIfAssigned });
         d = addDays(d, 1);
       }
     } else {
-      rows.push({ title: data.title, description: data.desc, type: data.type, date: data.date, time: data.time || null, horse_ids: data.horseIds, recurring: false, assigned_user: data.assignTo || null, done: doneIfAssigned });
+      const dateEnd = data.mode === "range" && data.rangeEnd && data.rangeEnd > data.date ? data.rangeEnd : null;
+      rows.push({ title: data.title, description: data.desc, type: data.type, date: data.date, date_end: dateEnd, time: data.time || null, horse_ids: data.horseIds, recurring: false, assigned_user: data.assignTo || null, done: doneIfAssigned });
     }
     await supabase.from("tasks").insert(rows);
     setShowNew(false);
@@ -75,7 +77,7 @@ export default function Aufgaben({ user }) {
         rows.push({
           title: `${horseName} versorgen (${user} abwesend)`,
           description: desc,
-          type: "uebernahme",
+          type: "uebernahme_erledigt",
           date: d,
           time: data.time || null,
           horse_ids: [hid],
@@ -91,6 +93,22 @@ export default function Aufgaben({ user }) {
     load();
   };
 
+  const updateTask = async (data) => {
+    const dateEnd = data.dateEnd && data.dateEnd > data.date ? data.dateEnd : null;
+    await supabase.from("tasks").update({
+      title: data.title, description: data.desc, type: data.type, date: data.date, date_end: dateEnd,
+      time: data.time || null, horse_ids: data.horseIds, assigned_user: data.assignTo || null,
+    }).eq("id", editTask.id);
+    setEditTask(null);
+    load();
+  };
+
+  const deleteTask = async () => {
+    await supabase.from("tasks").delete().eq("id", editTask.id);
+    setEditTask(null);
+    load();
+  };
+
   return (
     <div>
       <SectionTitle right={
@@ -102,24 +120,30 @@ export default function Aufgaben({ user }) {
       {upcoming.length === 0 && <Empty text="Keine Aufgaben geplant." />}
       {upcoming.map((x) => (
         <TaskCard key={x.id} task={x} horses={horses} user={user}
-          onUebernehmen={() => uebernehmen(x)} onErledigt={() => erledigt(x)} onZurueck={() => zuruecknehmen(x)} />
+          onUebernehmen={() => uebernehmen(x)} onErledigt={() => erledigt(x)} onZurueck={() => zuruecknehmen(x)} onEdit={() => setEditTask(x)} />
       ))}
       {past.length > 0 && (
         <>
           <SectionTitle>Vergangen</SectionTitle>
           {past.map((x) => (
             <TaskCard key={x.id} task={x} horses={horses} user={user} faded
-              onUebernehmen={() => uebernehmen(x)} onErledigt={() => erledigt(x)} onZurueck={() => zuruecknehmen(x)} />
+              onUebernehmen={() => uebernehmen(x)} onErledigt={() => erledigt(x)} onZurueck={() => zuruecknehmen(x)} onEdit={() => setEditTask(x)} />
           ))}
         </>
       )}
       {showNew && <NewTaskModal horses={horses} people={people} onClose={() => setShowNew(false)} onSave={addTask} />}
       {showAbsence && <NewAbsenceModal horses={horses} people={people.filter((p) => p !== user)} onClose={() => setShowAbsence(false)} onSave={addAbsence} />}
+      {editTask && (
+        <NewTaskModal
+          horses={horses} people={people} editing={editTask}
+          onClose={() => setEditTask(null)} onSave={updateTask} onDelete={deleteTask}
+        />
+      )}
     </div>
   );
 }
 
-function TaskCard({ task, horses, user, onUebernehmen, onErledigt, onZurueck, faded }) {
+function TaskCard({ task, horses, user, onUebernehmen, onErledigt, onZurueck, onEdit, faded }) {
   const names = (task.horse_ids || []).map((id) => horses.find((h) => h.id === id)?.name).filter(Boolean).join(", ");
   const isOpen = !task.assigned_user && task.type !== "info";
   let statusPill;
@@ -135,10 +159,17 @@ function TaskCard({ task, horses, user, onUebernehmen, onErledigt, onZurueck, fa
           <div style={{ fontWeight: 600, fontSize: 14, color: COLOR.ink }}>
             {task.title}{task.recurring && <Repeat size={12} style={{ marginLeft: 5, verticalAlign: -1, color: COLOR.inkSoft }} />}
           </div>
-          <div style={{ fontSize: 12, color: COLOR.inkSoft, marginTop: 2 }}>{fmtDate(task.date)}{task.time ? `, ${task.time}` : ""}{names ? ` · ${names}` : ""}</div>
+          <div style={{ fontSize: 12, color: COLOR.inkSoft, marginTop: 2 }}>
+            {task.date_end ? `${fmtDate(task.date)} – ${fmtDate(task.date_end)}` : fmtDate(task.date)}{task.time ? `, ${task.time}` : ""}{names ? ` · ${names}` : ""}
+          </div>
           {task.description && <div style={{ fontSize: 12, color: COLOR.inkSoft, marginTop: 2 }}>{task.description}</div>}
         </div>
-        {statusPill}
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 6 }}>
+          {statusPill}
+          <button onClick={onEdit} style={{ background: "none", border: "none", padding: 2, cursor: "pointer", color: COLOR.inkSoft }}>
+            <Pencil size={13} />
+          </button>
+        </div>
       </div>
       {task.type !== "info" && (
         <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
@@ -203,21 +234,25 @@ function NewAbsenceModal({ horses, people, onClose, onSave }) {
   );
 }
 
-function NewTaskModal({ horses, people, onClose, onSave }) {
-  const [title, setTitle] = useState("");
-  const [desc, setDesc] = useState("");
-  const [type, setType] = useState("uebernahme");
-  const [date, setDate] = useState(todayISO());
-  const [time, setTime] = useState("");
-  const [horseIds, setHorseIds] = useState([]);
-  const [recurring, setRecurring] = useState(false);
+function NewTaskModal({ horses, people, editing, onClose, onSave, onDelete }) {
+  const [title, setTitle] = useState(editing?.title || "");
+  const [desc, setDesc] = useState(editing?.description || "");
+  const [type, setType] = useState(editing?.type || "uebernahme");
+  const [date, setDate] = useState(editing?.date || todayISO());
+  const [dateEnd, setDateEnd] = useState(editing?.date_end || "");
+  const [time, setTime] = useState(editing?.time || "");
+  const [horseIds, setHorseIds] = useState(editing?.horse_ids || []);
+  const [mode, setMode] = useState("single"); // single | range | recurring
+  const [rangeEnd, setRangeEnd] = useState(addDays(todayISO(), 2));
   const [recurEnd, setRecurEnd] = useState(addDays(todayISO(), 6));
-  const [assignTo, setAssignTo] = useState("");
+  const [assignTo, setAssignTo] = useState(editing?.assigned_user || "");
+  const [confirmDelete, setConfirmDelete] = useState(false);
 
   const toggleHorse = (id) => setHorseIds((h) => (h.includes(id) ? h.filter((x) => x !== id) : [...h, id]));
+  const modeBtn = { flex: 1, padding: "7px 4px", borderRadius: 9, border: `1px solid ${COLOR.line}`, background: "#fff", fontSize: 12, fontWeight: 600, cursor: "pointer", color: COLOR.ink };
 
   return (
-    <Modal title="Neue Aufgabe" onClose={onClose}>
+    <Modal title={editing ? "Aufgabe bearbeiten" : "Neue Aufgabe"} onClose={onClose}>
       <label style={labelStyle}>Titel</label>
       <input style={inputStyle} value={title} onChange={(e) => setTitle(e.target.value)} placeholder="z. B. Pferde reinholen" />
       <label style={labelStyle}>Beschreibung (optional)</label>
@@ -226,10 +261,48 @@ function NewTaskModal({ horses, people, onClose, onSave }) {
       <select style={inputStyle} value={type} onChange={(e) => setType(e.target.value)}>
         {Object.entries(TASK_TYPES).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
       </select>
-      <div style={{ display: "flex", gap: 10 }}>
-        <div style={{ flex: 1 }}><label style={labelStyle}>Datum</label><input type="date" style={inputStyle} value={date} onChange={(e) => setDate(e.target.value)} /></div>
-        <div style={{ flex: 1 }}><label style={labelStyle}>Uhrzeit (optional)</label><input type="time" style={inputStyle} value={time} onChange={(e) => setTime(e.target.value)} /></div>
-      </div>
+      {editing ? (
+        <div style={{ display: "flex", gap: 10 }}>
+          <div style={{ flex: 1 }}><label style={labelStyle}>Datum</label><input type="date" style={inputStyle} value={date} onChange={(e) => setDate(e.target.value)} /></div>
+          <div style={{ flex: 1 }}><label style={labelStyle}>Bis (optional)</label><input type="date" style={inputStyle} value={dateEnd} onChange={(e) => setDateEnd(e.target.value)} /></div>
+        </div>
+      ) : (
+        <>
+          <label style={labelStyle}>Zeitliche Einordnung</label>
+          <div style={{ display: "flex", gap: 6, marginBottom: 10 }}>
+            <button type="button" onClick={() => setMode("single")} style={{ ...modeBtn, ...(mode === "single" ? { background: "#F3ECDD", borderColor: COLOR.accent } : {}) }}>Einzeltag</button>
+            <button type="button" onClick={() => setMode("range")} style={{ ...modeBtn, ...(mode === "range" ? { background: "#F3ECDD", borderColor: COLOR.accent } : {}) }}>Zeitraum</button>
+            <button type="button" onClick={() => setMode("recurring")} style={{ ...modeBtn, ...(mode === "recurring" ? { background: "#F3ECDD", borderColor: COLOR.accent } : {}) }}>Täglich wiederholen</button>
+          </div>
+          <div style={{ display: "flex", gap: 10 }}>
+            <div style={{ flex: 1 }}>
+              <label style={labelStyle}>{mode === "range" ? "Von" : "Datum"}</label>
+              <input type="date" style={inputStyle} value={date} onChange={(e) => setDate(e.target.value)} />
+            </div>
+            <div style={{ flex: 1 }}><label style={labelStyle}>Uhrzeit (optional)</label><input type="time" style={inputStyle} value={time} onChange={(e) => setTime(e.target.value)} /></div>
+          </div>
+        </>
+      )}
+      {!editing && mode === "range" && (
+        <>
+          <label style={labelStyle}>Bis</label>
+          <input type="date" style={inputStyle} value={rangeEnd} onChange={(e) => setRangeEnd(e.target.value)} />
+          <div style={{ fontSize: 11.5, color: COLOR.inkSoft, marginTop: -8, marginBottom: 10 }}>
+            Eine Aufgabe für den gesamten Zeitraum – kann an jedem Tag darin übernommen/erledigt werden.
+          </div>
+        </>
+      )}
+      {!editing && mode === "recurring" && (
+        <label style={labelStyle}>Wiederholen bis</label>
+      )}
+      {!editing && mode === "recurring" && (
+        <input type="date" style={inputStyle} value={recurEnd} onChange={(e) => setRecurEnd(e.target.value)} />
+      )}
+      {editing && (
+        <div style={{ display: "flex", gap: 10 }}>
+          <div style={{ flex: 1 }}><label style={labelStyle}>Uhrzeit (optional)</label><input type="time" style={inputStyle} value={time} onChange={(e) => setTime(e.target.value)} /></div>
+        </div>
+      )}
       <label style={labelStyle}>Betroffene Pferde</label>
       <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 12 }}>
         {horses.map((h) => (
@@ -248,20 +321,21 @@ function NewTaskModal({ horses, people, onClose, onSave }) {
           </select>
         </>
       )}
-      <label style={{ ...labelStyle, display: "flex", alignItems: "center", gap: 6 }}>
-        <input type="checkbox" checked={recurring} onChange={(e) => setRecurring(e.target.checked)} /> Wiederkehrend (täglich)
-      </label>
-      {recurring && (
-        <>
-          <label style={labelStyle}>Wiederholen bis</label>
-          <input type="date" style={inputStyle} value={recurEnd} onChange={(e) => setRecurEnd(e.target.value)} />
-        </>
-      )}
       <button
         disabled={!title.trim()}
-        onClick={() => onSave({ title: title.trim(), desc, type, date, time, horseIds, recurring, recurEnd, assignTo })}
+        onClick={() => onSave({ title: title.trim(), desc, type, date, dateEnd, time, horseIds, mode, rangeEnd, recurEnd, assignTo })}
         style={{ ...btnPrimary, width: "100%", padding: "11px 0", marginTop: 6, opacity: title.trim() ? 1 : 0.5 }}
-      >Aufgabe speichern</button>
+      >{editing ? "Speichern" : "Aufgabe speichern"}</button>
+      {editing && (
+        confirmDelete ? (
+          <div style={{ marginTop: 10, display: "flex", gap: 8 }}>
+            <button onClick={onDelete} style={{ ...btnPrimary, flex: 1, background: COLOR.dringend }}>Wirklich löschen</button>
+            <button onClick={() => setConfirmDelete(false)} style={{ ...btnGhost, flex: 1 }}>Abbrechen</button>
+          </div>
+        ) : (
+          <button onClick={() => setConfirmDelete(true)} style={{ ...btnGhost, width: "100%", marginTop: 8, color: COLOR.dringend }}>Aufgabe löschen</button>
+        )
+      )}
     </Modal>
   );
 }

@@ -24,12 +24,22 @@ export default function Finanzen({ user }) {
   };
 
   const addExpense = async (data) => {
+    const total = data.mode === "custom"
+      ? Object.values(data.splits).reduce((a, b) => a + Number(b || 0), 0)
+      : +data.amount;
     const { data: exp, error } = await supabase.from("expenses").insert({
-      description: data.desc, amount: +data.amount, date: todayISO(), paid_by: data.paidBy,
+      description: data.desc, amount: total, date: todayISO(), paid_by: data.paidBy,
     }).select().single();
     if (error) return;
-    const per = +(data.amount / data.people.length).toFixed(2);
-    const rows = data.people.map((p) => ({ expense_id: exp.id, user_name: p, amount: per, status: p === data.paidBy ? "erhalten" : "offen" }));
+    let rows;
+    if (data.mode === "custom") {
+      rows = Object.entries(data.splits).filter(([, amt]) => Number(amt) > 0).map(([p, amt]) => ({
+        expense_id: exp.id, user_name: p, amount: +Number(amt).toFixed(2), status: p === data.paidBy ? "erhalten" : "offen",
+      }));
+    } else {
+      const per = +(total / data.people.length).toFixed(2);
+      rows = data.people.map((p) => ({ expense_id: exp.id, user_name: p, amount: per, status: p === data.paidBy ? "erhalten" : "offen" }));
+    }
     await supabase.from("expense_splits").insert(rows);
     setShowNew(false);
     load();
@@ -82,19 +92,27 @@ function NewExpenseModal({ people, onClose, onSave }) {
   const [amount, setAmount] = useState("");
   const [paidBy, setPaidBy] = useState(people[0] || "");
   const [selected, setSelected] = useState(people);
+  const [mode, setMode] = useState("even"); // even | custom
+  const [splits, setSplits] = useState({});
   const toggle = (u) => setSelected((p) => (p.includes(u) ? p.filter((x) => x !== u) : [...p, u]));
+  const setSplitAmount = (u, val) => setSplits((s) => ({ ...s, [u]: val }));
+  const modeBtn = { flex: 1, padding: "8px 0", borderRadius: 9, border: `1px solid ${COLOR.line}`, background: "#fff", fontSize: 13, fontWeight: 600, cursor: "pointer" };
+  const customTotal = selected.reduce((a, u) => a + Number(splits[u] || 0), 0);
+
+  const canSave = mode === "even"
+    ? (desc.trim() && amount && selected.length > 0 && paidBy)
+    : (desc.trim() && selected.length > 0 && paidBy && customTotal > 0);
+
   return (
     <Modal title="Neue Ausgabe" onClose={onClose}>
       <label style={labelStyle}>Beschreibung</label>
-      <input style={inputStyle} value={desc} onChange={(e) => setDesc(e.target.value)} placeholder="z. B. Heu" />
-      <label style={labelStyle}>Betrag (€)</label>
-      <input type="number" style={inputStyle} value={amount} onChange={(e) => setAmount(e.target.value)} />
+      <input style={inputStyle} value={desc} onChange={(e) => setDesc(e.target.value)} placeholder="z. B. Mineralfutter" />
       <label style={labelStyle}>Bezahlt von</label>
       <select style={inputStyle} value={paidBy} onChange={(e) => setPaidBy(e.target.value)}>
         {people.map((u) => <option key={u}>{u}</option>)}
       </select>
       <label style={labelStyle}>Aufteilen auf</label>
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 14 }}>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 12 }}>
         {people.map((u) => (
           <button key={u} type="button" onClick={() => toggle(u)} style={{
             padding: "6px 11px", borderRadius: 999, border: `1px solid ${selected.includes(u) ? COLOR.accent : COLOR.line}`,
@@ -102,8 +120,36 @@ function NewExpenseModal({ people, onClose, onSave }) {
           }}>{u}</button>
         ))}
       </div>
-      <button disabled={!desc.trim() || !amount || selected.length === 0 || !paidBy} onClick={() => onSave({ desc: desc.trim(), amount, paidBy, people: selected })}
-        style={{ ...btnPrimary, width: "100%", padding: "11px 0", opacity: (!desc.trim() || !amount || selected.length === 0 || !paidBy) ? 0.5 : 1 }}>
+      <label style={labelStyle}>Aufteilung</label>
+      <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+        <button type="button" onClick={() => setMode("even")} style={{ ...modeBtn, ...(mode === "even" ? { background: "#F3ECDD", borderColor: COLOR.accent } : {}) }}>Gleichmäßig</button>
+        <button type="button" onClick={() => setMode("custom")} style={{ ...modeBtn, ...(mode === "custom" ? { background: "#F3ECDD", borderColor: COLOR.accent } : {}) }}>Individuell</button>
+      </div>
+      {mode === "even" ? (
+        <>
+          <label style={labelStyle}>Gesamtbetrag (€)</label>
+          <input type="number" style={inputStyle} value={amount} onChange={(e) => setAmount(e.target.value)} />
+        </>
+      ) : (
+        <>
+          {selected.length === 0 && <div style={{ fontSize: 12.5, color: COLOR.inkSoft, marginBottom: 10 }}>Wähle oben aus, wer beteiligt ist.</div>}
+          {selected.map((u) => (
+            <div key={u} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+              <span style={{ fontSize: 13, color: COLOR.ink, flex: 1 }}>{u}</span>
+              <input
+                type="number" style={{ ...inputStyle, width: 100, marginBottom: 0 }}
+                value={splits[u] || ""} onChange={(e) => setSplitAmount(u, e.target.value)} placeholder="0,00"
+              />
+              <span style={{ fontSize: 12.5, color: COLOR.inkSoft }}>€</span>
+            </div>
+          ))}
+          <div style={{ fontSize: 12.5, color: COLOR.inkSoft, marginTop: 4, marginBottom: 12 }}>
+            Gesamt: <strong style={{ color: COLOR.ink }}>{customTotal.toFixed(2)} €</strong>
+          </div>
+        </>
+      )}
+      <button disabled={!canSave} onClick={() => onSave({ desc: desc.trim(), amount, paidBy, people: selected, mode, splits })}
+        style={{ ...btnPrimary, width: "100%", padding: "11px 0", opacity: canSave ? 1 : 0.5 }}>
         Ausgabe speichern
       </button>
     </Modal>

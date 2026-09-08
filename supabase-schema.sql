@@ -30,6 +30,7 @@ create table if not exists tasks (
   description text,
   type text not null default 'uebernahme', -- uebernahme | uebernahme_erledigt | info
   date date not null,
+  date_end date,
   time text,
   horse_ids uuid[] default '{}',
   assigned_user text,
@@ -43,7 +44,9 @@ create table if not exists events (
   id uuid primary key default gen_random_uuid(),
   title text not null,
   date date not null,
+  date_end date,
   time text,
+  with_user text,
   created_at timestamptz default now()
 );
 
@@ -110,8 +113,51 @@ create table if not exists health_notes (
   created_at timestamptz default now()
 );
 
+-- Medikamente (mit Zeitraum, optional dauerhaft = kein date_to)
+create table if not exists medications (
+  id uuid primary key default gen_random_uuid(),
+  horse_id uuid not null references horses(id) on delete cascade,
+  user_name text not null,
+  name text not null,
+  dosage text,
+  date_from date not null,
+  date_to date,
+  note text,
+  created_at timestamptz default now()
+);
+
 -- Futterplan: ein gemeinsam bearbeitbares Textfeld pro Pferd
 alter table horses add column if not exists feed_plan text;
+
+-- Person bei gemeinsamen Terminen hinterlegen (falls Tabelle schon vorher existierte)
+alter table events add column if not exists with_user text;
+
+-- Zeitraum (von-bis) statt Einzeltag bei Aufgaben & Terminen (falls Tabellen schon vorher existierten)
+alter table tasks add column if not exists date_end date;
+alter table events add column if not exists date_end date;
+
+-- Fotos: Profilbild pro Pferd + Foto bei Gesundheitsnotiz
+alter table horses add column if not exists photo_url text;
+alter table health_notes add column if not exists photo_url text;
+
+-- Fotogalerie pro Pferd
+create table if not exists horse_photos (
+  id uuid primary key default gen_random_uuid(),
+  horse_id uuid not null references horses(id) on delete cascade,
+  url text not null,
+  caption text,
+  user_name text,
+  created_at timestamptz default now()
+);
+alter table horse_photos enable row level security;
+create policy "horse_photos_all" on horse_photos for all using (auth.role() = 'authenticated') with check (auth.role() = 'authenticated');
+
+-- Storage-Bucket für Fotos (öffentlich lesbar, nur angemeldete Nutzer:innen dürfen hochladen/löschen)
+insert into storage.buckets (id, name, public) values ('horse-photos', 'horse-photos', true) on conflict (id) do nothing;
+alter table storage.objects enable row level security;
+create policy "horse_photos_storage_read" on storage.objects for select using (bucket_id = 'horse-photos');
+create policy "horse_photos_storage_insert" on storage.objects for insert with check (bucket_id = 'horse-photos' and auth.role() = 'authenticated');
+create policy "horse_photos_storage_delete" on storage.objects for delete using (bucket_id = 'horse-photos' and auth.role() = 'authenticated');
 
 -- ============================================================
 -- Row Level Security aktivieren
