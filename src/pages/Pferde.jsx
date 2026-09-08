@@ -95,8 +95,8 @@ function AddHorseModal({ error, onClose, onSave }) {
       <input style={inputStyle} value={name} onChange={(e) => setName(e.target.value)} placeholder="z. B. Luna" />
       <label style={labelStyle}>Rasse (optional)</label>
       <input style={inputStyle} value={breed} onChange={(e) => setBreed(e.target.value)} />
-      <label style={labelStyle}>Geburtsjahr (optional)</label>
-      <input style={inputStyle} value={born} onChange={(e) => setBorn(e.target.value)} placeholder="z. B. 2015" />
+      <label style={labelStyle}>Geburtstag (optional)</label>
+      <input type="date" style={inputStyle} value={born} onChange={(e) => setBorn(e.target.value)} />
       <label style={labelStyle}>Besitzer:in (optional)</label>
       <input style={inputStyle} value={owner} onChange={(e) => setOwner(e.target.value)} />
       <label style={labelStyle}>Notiz (optional)</label>
@@ -126,6 +126,9 @@ function PferdDetail({ horse, user, onBack, onSave, onDelete }) {
   const [uid, setUid] = useState(null);
   const [healthNotes, setHealthNotes] = useState([]);
   const [showNewHealthNote, setShowNewHealthNote] = useState(false);
+  const [medications, setMedications] = useState([]);
+  const [showNewMedication, setShowNewMedication] = useState(false);
+  const [confirmDeleteMedId, setConfirmDeleteMedId] = useState(null);
   const [feedPlan, setFeedPlan] = useState(horse.feed_plan || "");
   const [editingFeedPlan, setEditingFeedPlan] = useState(false);
   const [savingFeedPlan, setSavingFeedPlan] = useState(false);
@@ -190,6 +193,24 @@ function PferdDetail({ horse, user, onBack, onSave, onDelete }) {
     setShowNewHealthNote(false);
     loadHealthNotes();
   };
+
+  const loadMedications = async () => {
+    const { data } = await supabase.from("medications").select("*").eq("horse_id", horse.id).order("date_from", { ascending: false });
+    setMedications(data ?? []);
+  };
+  const addMedication = async (m) => {
+    await supabase.from("medications").insert({
+      horse_id: horse.id, user_name: user, name: m.name, dosage: m.dosage || null,
+      date_from: m.dateFrom, date_to: m.ongoing ? null : (m.dateTo || null), note: m.note || null,
+    });
+    setShowNewMedication(false);
+    loadMedications();
+  };
+  const deleteMedication = async (id) => {
+    await supabase.from("medications").delete().eq("id", id);
+    setConfirmDeleteMedId(null);
+    loadMedications();
+  };
   const [feedPlanError, setFeedPlanError] = useState("");
   const saveFeedPlan = async () => {
     setSavingFeedPlan(true);
@@ -215,6 +236,7 @@ function PferdDetail({ horse, user, onBack, onSave, onDelete }) {
     loadTrainings();
     loadHealthNotes();
     loadPhotos();
+    loadMedications();
     supabase.auth.getUser().then(({ data }) => {
       const currentUid = data?.user?.id;
       setUid(currentUid);
@@ -273,8 +295,8 @@ function PferdDetail({ horse, user, onBack, onSave, onDelete }) {
           <div style={{ textAlign: "left", maxWidth: 320, margin: "10px auto 0" }}>
             <label style={labelStyle}>Rasse</label>
             <input style={inputStyle} value={infoBreed} onChange={(e) => setInfoBreed(e.target.value)} />
-            <label style={labelStyle}>Geburtsjahr</label>
-            <input style={inputStyle} value={infoBorn} onChange={(e) => setInfoBorn(e.target.value)} />
+            <label style={labelStyle}>Geburtstag</label>
+            <input type="date" style={inputStyle} value={infoBorn} onChange={(e) => setInfoBorn(e.target.value)} />
             <label style={labelStyle}>Besitzer:in</label>
             <input style={inputStyle} value={infoOwner} onChange={(e) => setInfoOwner(e.target.value)} />
             <label style={labelStyle}>Notiz</label>
@@ -288,7 +310,7 @@ function PferdDetail({ horse, user, onBack, onSave, onDelete }) {
           <>
             {(horse.breed || horse.born || horse.owner) && (
               <div style={{ fontSize: 13, color: COLOR.inkSoft }}>
-                {[horse.breed, horse.born && `geb. ${horse.born}`, horse.owner && `Besitzer:in ${horse.owner}`].filter(Boolean).join(" · ")}
+                {[horse.breed, horse.born && `geb. ${new Date(horse.born + "T00:00:00").toLocaleDateString("de-DE")}`, horse.owner && `Besitzer:in ${horse.owner}`].filter(Boolean).join(" · ")}
               </div>
             )}
             {horse.note && <div style={{ fontSize: 12.5, color: COLOR.inkSoft, marginTop: 6, fontStyle: "italic" }}>{horse.note}</div>}
@@ -353,6 +375,39 @@ function PferdDetail({ horse, user, onBack, onSave, onDelete }) {
         </Card>
       ))}
 
+      <SectionTitle right={<IconBtn onClick={() => setShowNewMedication(true)}><Plus size={15} /> Medikament</IconBtn>}>
+        <PillIcon size={15} style={{ marginRight: 5, verticalAlign: -2 }} />Medikamente
+      </SectionTitle>
+      {medications.length === 0 && <Empty text="Keine Medikamente hinterlegt." />}
+      {medications.map((m) => {
+        const t = todayISO();
+        const active = m.date_from <= t && (!m.date_to || m.date_to >= t);
+        return (
+          <Card key={m.id} style={{ marginBottom: 8 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
+              <div style={{ minWidth: 0 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                  <span style={{ fontSize: 14, fontWeight: 600, color: COLOR.ink }}>{m.name}</span>
+                  {active && <Pill bg={COLOR.uebernommenBg} fg={COLOR.uebernommen}>läuft</Pill>}
+                </div>
+                <div style={{ fontSize: 11.5, color: COLOR.inkSoft, marginTop: 2 }}>
+                  {m.dosage && `${m.dosage} · `}{fmtDate(m.date_from)} – {m.date_to ? fmtDate(m.date_to) : "dauerhaft"}
+                </div>
+                {m.note && <div style={{ fontSize: 12.5, color: COLOR.ink, marginTop: 4 }}>{m.note}</div>}
+              </div>
+            </div>
+            {confirmDeleteMedId === m.id ? (
+              <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+                <button onClick={() => deleteMedication(m.id)} style={{ ...btnPrimary, background: COLOR.dringend }}>Wirklich löschen</button>
+                <button onClick={() => setConfirmDeleteMedId(null)} style={btnGhost}>Abbrechen</button>
+              </div>
+            ) : (
+              <button onClick={() => setConfirmDeleteMedId(m.id)} style={{ ...btnGhost, marginTop: 8 }}>Löschen</button>
+            )}
+          </Card>
+        );
+      })}
+
       <SectionTitle>
         <Wheat size={15} style={{ marginRight: 5, verticalAlign: -2 }} />Futterplan
       </SectionTitle>
@@ -402,6 +457,7 @@ function PferdDetail({ horse, user, onBack, onSave, onDelete }) {
       {showNewTraining && <NewTrainingModal onClose={() => setShowNewTraining(false)} onSave={addTraining} />}
       {showNewPlan && <NewPlanModal onClose={() => setShowNewPlan(false)} onSave={addPlan} />}
       {showNewHealthNote && <NewHealthNoteModal onClose={() => setShowNewHealthNote(false)} onSave={addHealthNote} />}
+      {showNewMedication && <NewMedicationModal onClose={() => setShowNewMedication(false)} onSave={addMedication} />}
 
       <SectionTitle right={<IconBtn onClick={() => galleryPicInput.current?.click()}><Plus size={15} /> Foto</IconBtn>}>
         <Camera size={15} style={{ marginRight: 5, verticalAlign: -2 }} />Galerie
@@ -561,6 +617,42 @@ function NewHealthNoteModal({ onClose, onSave }) {
         disabled={!note.trim()}
         onClick={() => onSave({ date, note: note.trim(), photoFile })}
         style={{ ...btnPrimary, width: "100%", padding: "11px 0", opacity: !note.trim() ? 0.5 : 1 }}
+      >Speichern</button>
+    </Modal>
+  );
+}
+
+function NewMedicationModal({ onClose, onSave }) {
+  const [name, setName] = useState("");
+  const [dosage, setDosage] = useState("");
+  const [dateFrom, setDateFrom] = useState(todayISO());
+  const [ongoing, setOngoing] = useState(false);
+  const [dateTo, setDateTo] = useState("");
+  const [note, setNote] = useState("");
+  return (
+    <Modal title="Medikament" onClose={onClose}>
+      <label style={labelStyle}>Name</label>
+      <input style={inputStyle} value={name} onChange={(e) => setName(e.target.value)} placeholder="z. B. Schmerzmittel" />
+      <label style={labelStyle}>Dosierung (optional)</label>
+      <input style={inputStyle} value={dosage} onChange={(e) => setDosage(e.target.value)} placeholder="z. B. 2x täglich 10ml" />
+      <label style={labelStyle}>Von</label>
+      <input type="date" style={inputStyle} value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} />
+      <label style={{ ...labelStyle, display: "flex", alignItems: "center", gap: 6 }}>
+        <input type="checkbox" checked={ongoing} onChange={(e) => setOngoing(e.target.checked)} />
+        Dauerhaft / kein Enddatum
+      </label>
+      {!ongoing && (
+        <>
+          <label style={labelStyle}>Bis</label>
+          <input type="date" style={inputStyle} value={dateTo} onChange={(e) => setDateTo(e.target.value)} />
+        </>
+      )}
+      <label style={labelStyle}>Notiz (optional)</label>
+      <textarea style={{ ...inputStyle, minHeight: 60 }} value={note} onChange={(e) => setNote(e.target.value)} />
+      <button
+        disabled={!name.trim() || !dateFrom}
+        onClick={() => onSave({ name: name.trim(), dosage: dosage.trim(), dateFrom, ongoing, dateTo, note: note.trim() })}
+        style={{ ...btnPrimary, width: "100%", padding: "11px 0", opacity: (!name.trim() || !dateFrom) ? 0.5 : 1 }}
       >Speichern</button>
     </Modal>
   );

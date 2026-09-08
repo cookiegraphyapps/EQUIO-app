@@ -150,11 +150,16 @@ create table if not exists horse_photos (
   created_at timestamptz default now()
 );
 alter table horse_photos enable row level security;
+drop policy if exists "horse_photos_all" on horse_photos;
 create policy "horse_photos_all" on horse_photos for all using (auth.role() = 'authenticated') with check (auth.role() = 'authenticated');
 
 -- Storage-Bucket für Fotos (öffentlich lesbar, nur angemeldete Nutzer:innen dürfen hochladen/löschen)
 insert into storage.buckets (id, name, public) values ('horse-photos', 'horse-photos', true) on conflict (id) do nothing;
-alter table storage.objects enable row level security;
+-- Hinweis: RLS ist bei storage.objects in Supabase bereits standardmäßig aktiv,
+-- ein eigenes "enable row level security" ist hier nicht erlaubt (Fehler 42501) und nicht nötig.
+drop policy if exists "horse_photos_storage_read" on storage.objects;
+drop policy if exists "horse_photos_storage_insert" on storage.objects;
+drop policy if exists "horse_photos_storage_delete" on storage.objects;
 create policy "horse_photos_storage_read" on storage.objects for select using (bucket_id = 'horse-photos');
 create policy "horse_photos_storage_insert" on storage.objects for insert with check (bucket_id = 'horse-photos' and auth.role() = 'authenticated');
 create policy "horse_photos_storage_delete" on storage.objects for delete using (bucket_id = 'horse-photos' and auth.role() = 'authenticated');
@@ -172,13 +177,25 @@ alter table expense_splits enable row level security;
 alter table trainings enable row level security;
 alter table training_plans enable row level security;
 alter table health_notes enable row level security;
+alter table medications enable row level security;
 
 -- Profile: jede:r sieht alle Namen (für Zuordnung), bearbeitet nur sich selbst
+drop policy if exists "profiles_select_all" on profiles;
+drop policy if exists "profiles_insert_own" on profiles;
+drop policy if exists "profiles_update_own" on profiles;
 create policy "profiles_select_all" on profiles for select using (auth.role() = 'authenticated');
 create policy "profiles_insert_own" on profiles for insert with check (auth.uid() = id);
 create policy "profiles_update_own" on profiles for update using (auth.uid() = id);
 
 -- Gemeinsame Tabellen: alle angemeldeten Nutzer:innen dürfen lesen & schreiben
+drop policy if exists "horses_all" on horses;
+drop policy if exists "tasks_all" on tasks;
+drop policy if exists "events_all" on events;
+drop policy if exists "expenses_all" on expenses;
+drop policy if exists "expense_splits_all" on expense_splits;
+drop policy if exists "trainings_all" on trainings;
+drop policy if exists "health_notes_all" on health_notes;
+drop policy if exists "medications_all" on medications;
 create policy "horses_all" on horses for all using (auth.role() = 'authenticated') with check (auth.role() = 'authenticated');
 create policy "tasks_all" on tasks for all using (auth.role() = 'authenticated') with check (auth.role() = 'authenticated');
 create policy "events_all" on events for all using (auth.role() = 'authenticated') with check (auth.role() = 'authenticated');
@@ -186,8 +203,11 @@ create policy "expenses_all" on expenses for all using (auth.role() = 'authentic
 create policy "expense_splits_all" on expense_splits for all using (auth.role() = 'authenticated') with check (auth.role() = 'authenticated');
 create policy "trainings_all" on trainings for all using (auth.role() = 'authenticated') with check (auth.role() = 'authenticated');
 create policy "health_notes_all" on health_notes for all using (auth.role() = 'authenticated') with check (auth.role() = 'authenticated');
+create policy "medications_all" on medications for all using (auth.role() = 'authenticated') with check (auth.role() = 'authenticated');
 
 -- Private Termine & Trainingsplanung: nur der/die Ersteller:in sieht & bearbeitet eigene Einträge
+drop policy if exists "personal_events_own" on personal_events;
+drop policy if exists "training_plans_own" on training_plans;
 create policy "personal_events_own" on personal_events for all
   using (auth.uid() = user_id) with check (auth.uid() = user_id);
 create policy "training_plans_own" on training_plans for all

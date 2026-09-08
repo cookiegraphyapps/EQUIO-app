@@ -43,21 +43,24 @@ export default function Kalender({ user }) {
   const [tasks, setTasks] = useState([]);
   const [personalEvents, setPersonalEvents] = useState([]);
   const [people, setPeople] = useState([]);
+  const [horses, setHorses] = useState([]);
 
   const grid = monthGrid(cursor);
 
   const load = async () => {
     const { from, to } = grid;
-    const [eventsRes, tasksRes, personalRes, peopleRes] = await Promise.all([
+    const [eventsRes, tasksRes, personalRes, peopleRes, horsesRes] = await Promise.all([
       supabase.from("events").select("*").gte("date", from).lte("date", to),
       supabase.from("tasks").select("*").gte("date", from).lte("date", to),
       supabase.from("personal_events").select("*").gte("date", from).lte("date", to),
       supabase.from("profiles").select("name"),
+      supabase.from("horses").select("id, name, born"),
     ]);
     setEvents(eventsRes.data ?? []);
     setTasks(tasksRes.data ?? []);
     setPersonalEvents(personalRes.data ?? []);
     setPeople((peopleRes.data ?? []).map((p) => p.name));
+    setHorses(horsesRes.data ?? []);
   };
 
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [cursor]);
@@ -69,6 +72,11 @@ export default function Kalender({ user }) {
       list.push({ ...t, kind: t.type === "info" ? "gemeinsam" : !t.assigned_user ? "dringend" : t.done ? "erledigt" : "uebernommen" })
     );
     personalEvents.filter((e) => e.date === d).forEach((e) => list.push({ ...e, kind: "privat" }));
+    // Geburtstage: jedes Jahr automatisch am gleichen Tag, ohne eigenen Datenbank-Eintrag
+    horses.filter((h) => h.born && h.born.slice(5, 10) === d.slice(5, 10)).forEach((h) => {
+      const age = Number(d.slice(0, 4)) - Number(h.born.slice(0, 4));
+      list.push({ id: `bday-${h.id}-${d}`, title: `🎂 Geburtstag ${h.name}${age > 0 ? ` (${age} Jahre)` : ""}`, kind: "gemeinsam", virtual: true });
+    });
     return list.sort((a, b) => (a.time || "").localeCompare(b.time || ""));
   };
 
@@ -165,7 +173,7 @@ export default function Kalender({ user }) {
         </div>
         {selectedList.length === 0 && <div style={{ fontSize: 12.5, color: COLOR.inkSoft, paddingLeft: 2 }}>–</div>}
         {selectedList.map((e, i) => {
-          const clickable = !e.type; // Aufgaben (haben ein "type"-Feld) werden auf der Aufgaben-Seite bearbeitet
+          const clickable = !e.type && !e.virtual; // Aufgaben (type) und Geburtstage (virtual) sind nicht bearbeitbar
           return (
             <div key={i} onClick={() => clickable && setEditEntry(e)} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 2px", cursor: clickable ? "pointer" : "default" }}>
               <span style={{ width: 8, height: 8, borderRadius: 4, background: cmap[e.kind], flexShrink: 0 }} />

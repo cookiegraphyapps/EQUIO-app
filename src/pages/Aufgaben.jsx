@@ -315,16 +315,20 @@ function NewTaskModal({ horses, people, editing, onClose, onSave, onDelete }) {
       {type !== "info" && (
         <>
           <label style={labelStyle}>Direkt zuweisen (optional)</label>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 8 }}>
+            {people.map((p) => (
+              <button key={p} type="button" onClick={() => setAssignTo(assignTo === p ? "" : p)} style={{
+                padding: "6px 11px", borderRadius: 999, border: `1px solid ${assignTo === p ? COLOR.accent : COLOR.line}`,
+                background: assignTo === p ? "#F3ECDD" : "#fff", fontSize: 12.5, cursor: "pointer", color: COLOR.ink,
+              }}>{p}</button>
+            ))}
+          </div>
           <input
             style={inputStyle}
-            list="assignto-people"
             value={assignTo}
             onChange={(e) => setAssignTo(e.target.value)}
-            placeholder="Offen lassen, Namen wählen oder eintippen (z. B. Mama)"
+            placeholder="Offen lassen oder eigenen Namen eintragen (z. B. Mama)"
           />
-          <datalist id="assignto-people">
-            {people.map((p) => <option key={p} value={p} />)}
-          </datalist>
         </>
       )}
       <button

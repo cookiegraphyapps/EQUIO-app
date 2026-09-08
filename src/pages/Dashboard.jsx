@@ -60,7 +60,10 @@ export default function Dashboard({ user }) {
   const t = todayISO();
   const myTasks = tasks.filter((x) => x.assigned_user === user && !x.done && x.date <= addDays(t, 1));
   const openTasks = tasks.filter((x) => x.date === t && !x.assigned_user && x.type !== "info");
-  const todayEvents = [...events, ...tasks.filter((x) => x.type === "info" && x.date === t)].sort((a, b) => (a.time || "").localeCompare(b.time || ""));
+  const birthdaysToday = horses.filter((h) => h.born && h.born.slice(5, 10) === t.slice(5, 10)).map((h) => ({
+    id: `bday-${h.id}`, title: `🎂 Geburtstag ${h.name}`, time: "",
+  }));
+  const todayEvents = [...events, ...tasks.filter((x) => x.type === "info" && x.date === t), ...birthdaysToday].sort((a, b) => (a.time || "").localeCompare(b.time || ""));
 
   const dueSoon = [];
   horses.forEach((h) => Object.entries(h.health || {}).forEach(([k, v]) => {
@@ -105,7 +108,7 @@ export default function Dashboard({ user }) {
       {todayEvents.map((e) => (
         <Card key={e.id} style={{ marginBottom: 8, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <span style={{ fontSize: 14, color: COLOR.ink }}>{e.title}</span>
-          <Pill bg={COLOR.gemeinsamBg} fg={COLOR.gemeinsam}>{e.time}</Pill>
+          {e.time && <Pill bg={COLOR.gemeinsamBg} fg={COLOR.gemeinsam}>{e.time}</Pill>}
         </Card>
       ))}
 
