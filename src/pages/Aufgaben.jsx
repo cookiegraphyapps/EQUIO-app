@@ -53,9 +53,10 @@ export default function Aufgaben({ user }) {
     const doneIfAssigned = !!data.assignTo && data.type === "uebernahme";
     const rows = [];
     if (data.mode === "recurring" && data.recurEnd) {
+      const seriesId = crypto.randomUUID();
       let d = data.date;
       while (d <= data.recurEnd) {
-        rows.push({ title: data.title, description: data.desc, type: data.type, date: d, date_end: null, time: data.time || null, horse_ids: data.horseIds, recurring: true, assigned_user: data.assignTo || null, done: doneIfAssigned });
+        rows.push({ title: data.title, description: data.desc, type: data.type, date: d, date_end: null, time: data.time || null, horse_ids: data.horseIds, recurring: true, series_id: seriesId, assigned_user: data.assignTo || null, done: doneIfAssigned });
         d = addDays(d, 1);
       }
     } else {
@@ -94,17 +95,28 @@ export default function Aufgaben({ user }) {
   };
 
   const updateTask = async (data) => {
-    const dateEnd = data.dateEnd && data.dateEnd > data.date ? data.dateEnd : null;
-    await supabase.from("tasks").update({
-      title: data.title, description: data.desc, type: data.type, date: data.date, date_end: dateEnd,
-      time: data.time || null, horse_ids: data.horseIds, assigned_user: data.assignTo || null,
-    }).eq("id", editTask.id);
+    if (data.scope === "series" && editTask.series_id) {
+      await supabase.from("tasks").update({
+        title: data.title, description: data.desc, type: data.type,
+        time: data.time || null, horse_ids: data.horseIds, assigned_user: data.assignTo || null,
+      }).eq("series_id", editTask.series_id);
+    } else {
+      const dateEnd = data.dateEnd && data.dateEnd > data.date ? data.dateEnd : null;
+      await supabase.from("tasks").update({
+        title: data.title, description: data.desc, type: data.type, date: data.date, date_end: dateEnd,
+        time: data.time || null, horse_ids: data.horseIds, assigned_user: data.assignTo || null,
+      }).eq("id", editTask.id);
+    }
     setEditTask(null);
     load();
   };
 
-  const deleteTask = async () => {
-    await supabase.from("tasks").delete().eq("id", editTask.id);
+  const deleteTask = async (scope) => {
+    if (scope === "series" && editTask.series_id) {
+      await supabase.from("tasks").delete().eq("series_id", editTask.series_id);
+    } else {
+      await supabase.from("tasks").delete().eq("id", editTask.id);
+    }
     setEditTask(null);
     load();
   };
@@ -149,7 +161,7 @@ function TaskCard({ task, horses, user, onUebernehmen, onErledigt, onZurueck, on
   let statusPill;
   if (task.type === "info") statusPill = <Pill bg={COLOR.gemeinsamBg} fg={COLOR.gemeinsam}>Info</Pill>;
   else if (isOpen) statusPill = <Pill bg={COLOR.dringendBg} fg={COLOR.dringend}><AlertTriangle size={11} />offen</Pill>;
-  else if (task.done) statusPill = <Pill bg={COLOR.erledigtBg} fg={COLOR.erledigt}><CheckCircle2 size={11} />erledigt</Pill>;
+  else if (task.type === "uebernahme_erledigt" && task.done) statusPill = <Pill bg={COLOR.erledigtBg} fg={COLOR.erledigt}><CheckCircle2 size={11} />erledigt</Pill>;
   else statusPill = <Pill bg={COLOR.uebernommenBg} fg={COLOR.uebernommen}>{task.assigned_user} übernimmt</Pill>;
 
   return (
@@ -177,7 +189,7 @@ function TaskCard({ task, horses, user, onUebernehmen, onErledigt, onZurueck, on
           {!isOpen && task.type === "uebernahme_erledigt" && !task.done && task.assigned_user === user && (
             <button onClick={onErledigt} style={btnPrimary}>Erledigt</button>
           )}
-          {!isOpen && task.assigned_user === user && (!task.done || task.type === "uebernahme_erledigt") && (
+          {!isOpen && task.assigned_user === user && (
             <button onClick={onZurueck} style={btnGhost}>Zurücknehmen</button>
           )}
         </div>
@@ -247,6 +259,7 @@ function NewTaskModal({ horses, people, editing, onClose, onSave, onDelete }) {
   const [recurEnd, setRecurEnd] = useState(addDays(todayISO(), 6));
   const [assignTo, setAssignTo] = useState(editing?.assigned_user || "");
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [scope, setScope] = useState("instance"); // instance | series (nur relevant bei wiederkehrenden Aufgaben)
 
   const toggleHorse = (id) => setHorseIds((h) => (h.includes(id) ? h.filter((x) => x !== id) : [...h, id]));
   const modeBtn = { flex: 1, padding: "7px 4px", borderRadius: 9, border: `1px solid ${COLOR.line}`, background: "#fff", fontSize: 12, fontWeight: 600, cursor: "pointer", color: COLOR.ink };
@@ -261,11 +274,26 @@ function NewTaskModal({ horses, people, editing, onClose, onSave, onDelete }) {
       <select style={inputStyle} value={type} onChange={(e) => setType(e.target.value)}>
         {Object.entries(TASK_TYPES).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
       </select>
+      {editing?.series_id && (
+        <>
+          <label style={labelStyle}>Gilt für</label>
+          <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+            <button type="button" onClick={() => setScope("instance")} style={{ ...modeBtn, flex: 1, ...(scope === "instance" ? { background: "#F3ECDD", borderColor: COLOR.accent } : {}) }}>Nur diesen Termin</button>
+            <button type="button" onClick={() => setScope("series")} style={{ ...modeBtn, flex: 1, ...(scope === "series" ? { background: "#F3ECDD", borderColor: COLOR.accent } : {}) }}>Ganze Serie</button>
+          </div>
+        </>
+      )}
       {editing ? (
-        <div style={{ display: "flex", gap: 10 }}>
-          <div style={{ flex: 1 }}><label style={labelStyle}>Datum</label><input type="date" style={inputStyle} value={date} onChange={(e) => setDate(e.target.value)} /></div>
-          <div style={{ flex: 1 }}><label style={labelStyle}>Bis (optional)</label><input type="date" style={inputStyle} value={dateEnd} onChange={(e) => setDateEnd(e.target.value)} /></div>
-        </div>
+        scope === "series" ? (
+          <div style={{ fontSize: 11.5, color: COLOR.inkSoft, marginTop: -4, marginBottom: 10 }}>
+            Datum wird pro Termin beibehalten – nur Titel, Typ, Pferde, Zuweisung und Uhrzeit gelten für die ganze Serie.
+          </div>
+        ) : (
+          <div style={{ display: "flex", gap: 10 }}>
+            <div style={{ flex: 1 }}><label style={labelStyle}>Datum</label><input type="date" style={inputStyle} value={date} onChange={(e) => setDate(e.target.value)} /></div>
+            <div style={{ flex: 1 }}><label style={labelStyle}>Bis (optional)</label><input type="date" style={inputStyle} value={dateEnd} onChange={(e) => setDateEnd(e.target.value)} /></div>
+          </div>
+        )
       ) : (
         <>
           <label style={labelStyle}>Zeitliche Einordnung</label>
@@ -333,17 +361,21 @@ function NewTaskModal({ horses, people, editing, onClose, onSave, onDelete }) {
       )}
       <button
         disabled={!title.trim()}
-        onClick={() => onSave({ title: title.trim(), desc, type, date, dateEnd, time, horseIds, mode, rangeEnd, recurEnd, assignTo })}
+        onClick={() => onSave({ title: title.trim(), desc, type, date, dateEnd, time, horseIds, mode, rangeEnd, recurEnd, assignTo, scope })}
         style={{ ...btnPrimary, width: "100%", padding: "11px 0", marginTop: 6, opacity: title.trim() ? 1 : 0.5 }}
       >{editing ? "Speichern" : "Aufgabe speichern"}</button>
       {editing && (
         confirmDelete ? (
           <div style={{ marginTop: 10, display: "flex", gap: 8 }}>
-            <button onClick={onDelete} style={{ ...btnPrimary, flex: 1, background: COLOR.dringend }}>Wirklich löschen</button>
+            <button onClick={() => onDelete(scope)} style={{ ...btnPrimary, flex: 1, background: COLOR.dringend }}>
+              {editing.series_id && scope === "series" ? "Ganze Serie löschen" : "Wirklich löschen"}
+            </button>
             <button onClick={() => setConfirmDelete(false)} style={{ ...btnGhost, flex: 1 }}>Abbrechen</button>
           </div>
         ) : (
-          <button onClick={() => setConfirmDelete(true)} style={{ ...btnGhost, width: "100%", marginTop: 8, color: COLOR.dringend }}>Aufgabe löschen</button>
+          <button onClick={() => setConfirmDelete(true)} style={{ ...btnGhost, width: "100%", marginTop: 8, color: COLOR.dringend }}>
+            {editing.series_id && scope === "series" ? "Ganze Serie löschen" : "Aufgabe löschen"}
+          </button>
         )
       )}
     </Modal>

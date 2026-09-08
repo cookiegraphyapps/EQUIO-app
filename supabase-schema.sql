@@ -136,6 +136,9 @@ alter table events add column if not exists with_user text;
 alter table tasks add column if not exists date_end date;
 alter table events add column if not exists date_end date;
 
+-- Serien-Kennung für wiederkehrende Aufgaben (damit man die ganze Serie oder nur einen Termin bearbeiten kann)
+alter table tasks add column if not exists series_id uuid;
+
 -- Fotos: Profilbild pro Pferd + Foto bei Gesundheitsnotiz
 alter table horses add column if not exists photo_url text;
 alter table health_notes add column if not exists photo_url text;

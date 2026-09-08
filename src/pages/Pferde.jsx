@@ -132,17 +132,9 @@ function PferdDetail({ horse, user, onBack, onSave, onDelete }) {
   const [feedPlan, setFeedPlan] = useState(horse.feed_plan || "");
   const [editingFeedPlan, setEditingFeedPlan] = useState(false);
   const [savingFeedPlan, setSavingFeedPlan] = useState(false);
-  const [photos, setPhotos] = useState([]);
   const [uploadingProfilePic, setUploadingProfilePic] = useState(false);
-  const [uploadingGalleryPic, setUploadingGalleryPic] = useState(false);
   const [viewerPhoto, setViewerPhoto] = useState(null);
   const profilePicInput = useRef(null);
-  const galleryPicInput = useRef(null);
-
-  const loadPhotos = async () => {
-    const { data } = await supabase.from("horse_photos").select("*").eq("horse_id", horse.id).order("created_at", { ascending: false });
-    setPhotos(data ?? []);
-  };
 
   const onProfilePicChange = async (e) => {
     const file = e.target.files?.[0];
@@ -155,31 +147,6 @@ function PferdDetail({ horse, user, onBack, onSave, onDelete }) {
       setUploadingProfilePic(false);
       e.target.value = "";
     }
-  };
-
-  const onGalleryPicChange = async (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    setUploadingGalleryPic(true);
-    try {
-      const url = await uploadPhoto(file, `${horse.id}/gallery`);
-      await supabase.from("horse_photos").insert({ horse_id: horse.id, url, user_name: user });
-      loadPhotos();
-    } finally {
-      setUploadingGalleryPic(false);
-      e.target.value = "";
-    }
-  };
-
-  const usePhotoAsProfile = (url) => {
-    onSave({ photo_url: url });
-    setViewerPhoto(null);
-  };
-
-  const deletePhoto = async (photoId) => {
-    await supabase.from("horse_photos").delete().eq("id", photoId);
-    setViewerPhoto(null);
-    loadPhotos();
   };
 
   const loadHealthNotes = async () => {
@@ -235,7 +202,6 @@ function PferdDetail({ horse, user, onBack, onSave, onDelete }) {
   useEffect(() => {
     loadTrainings();
     loadHealthNotes();
-    loadPhotos();
     loadMedications();
     supabase.auth.getUser().then(({ data }) => {
       const currentUid = data?.user?.id;
@@ -459,28 +425,12 @@ function PferdDetail({ horse, user, onBack, onSave, onDelete }) {
       {showNewHealthNote && <NewHealthNoteModal onClose={() => setShowNewHealthNote(false)} onSave={addHealthNote} />}
       {showNewMedication && <NewMedicationModal onClose={() => setShowNewMedication(false)} onSave={addMedication} />}
 
-      <SectionTitle right={<IconBtn onClick={() => galleryPicInput.current?.click()}><Plus size={15} /> Foto</IconBtn>}>
-        <Camera size={15} style={{ marginRight: 5, verticalAlign: -2 }} />Galerie
-      </SectionTitle>
-      <input ref={galleryPicInput} type="file" accept="image/*" style={{ display: "none" }} onChange={onGalleryPicChange} />
-      {uploadingGalleryPic && <div style={{ fontSize: 12, color: COLOR.inkSoft, marginBottom: 8 }}>Foto wird hochgeladen …</div>}
-      {photos.length === 0 && !uploadingGalleryPic && <Empty text="Noch keine Fotos." />}
-      {photos.length > 0 && (
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 6, marginBottom: 4 }}>
-          {photos.map((p) => (
-            <button key={p.id} onClick={() => setViewerPhoto(p)} style={{ border: "none", padding: 0, cursor: "pointer", aspectRatio: "1", borderRadius: 8, overflow: "hidden", background: "#F3ECDD" }}>
-              <img src={p.url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-            </button>
-          ))}
-        </div>
-      )}
-
       {viewerPhoto && (
         <PhotoViewerModal
           photo={viewerPhoto}
           onClose={() => setViewerPhoto(null)}
-          onUseAsProfile={viewerPhoto.id ? () => usePhotoAsProfile(viewerPhoto.url) : null}
-          onDelete={viewerPhoto.id ? () => deletePhoto(viewerPhoto.id) : null}
+          onUseAsProfile={null}
+          onDelete={null}
         />
       )}
 
