@@ -1,0 +1,9 @@
+{
+  "name": "EQUIO – Der Ponyplaner",
+  "short_name": "EQUIO",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#EEEEE3",
+  "theme_color": "#EEEEE3",
+  "icons": []
+}
