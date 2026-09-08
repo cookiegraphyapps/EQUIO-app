@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { AlertTriangle, CheckCircle2 } from "lucide-react";
 import { supabase } from "../supabaseClient";
-import { Card, SectionTitle, Empty, Pill, COLOR, todayISO, addDays, daysUntil, nextDue, HEALTH_LABELS } from "../components/ui";
+import { Card, SectionTitle, Empty, Pill, COLOR, todayISO, addDays, fmtDate, daysUntil, nextDue, HEALTH_LABELS } from "../components/ui";
 
 export default function Dashboard({ user }) {
   const [loading, setLoading] = useState(true);
@@ -19,9 +19,37 @@ export default function Dashboard({ user }) {
         supabase.from("horses").select("*"),
         supabase.from("expenses").select("*, expense_splits(*)"),
       ]);
-      setTasks(tasksRes.data ?? []);
+      const existingTasks = tasksRes.data ?? [];
+      const horsesData = horsesRes.data ?? [];
+
+      // 1 Woche vor Fälligkeit automatisch eine Aufgabe "Termin ausmachen" anlegen,
+      // falls noch keine offene Aufgabe dafür existiert.
+      const newReminders = [];
+      horsesData.forEach((h) => {
+        Object.entries(h.health || {}).forEach(([k, v]) => {
+          if (!HEALTH_LABELS[k]) return;
+          const due = nextDue(v);
+          if (!due) return;
+          const reminderDate = addDays(due, -7);
+          if (t < reminderDate) return;
+          const title = `${HEALTH_LABELS[k].label}-Termin ausmachen – ${h.name}`;
+          const alreadyExists = existingTasks.some((task) => task.title === title && !task.done && (task.horse_ids || []).includes(h.id));
+          if (!alreadyExists) {
+            newReminders.push({
+              title, description: `Fällig: ${fmtDate(due)}`, type: "uebernahme_erledigt",
+              date: t, horse_ids: [h.id], assigned_user: null, done: false, recurring: false,
+            });
+          }
+        });
+      });
+      if (newReminders.length > 0) {
+        const { data: inserted } = await supabase.from("tasks").insert(newReminders).select();
+        if (inserted) existingTasks.push(...inserted);
+      }
+
+      setTasks(existingTasks);
       setEvents(eventsRes.data ?? []);
-      setHorses(horsesRes.data ?? []);
+      setHorses(horsesData);
       setExpenses(expensesRes.data ?? []);
       setLoading(false);
     })();
@@ -38,6 +66,7 @@ export default function Dashboard({ user }) {
   horses.forEach((h) => Object.entries(h.health || {}).forEach(([k, v]) => {
     if (!HEALTH_LABELS[k]) return;
     const due = nextDue(v);
+    if (!due) return;
     const d = daysUntil(due);
     if (d <= 14) dueSoon.push({ horse: h.name, label: HEALTH_LABELS[k].label, days: d });
   }));

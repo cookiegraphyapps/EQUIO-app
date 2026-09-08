@@ -28,7 +28,7 @@ export const HEALTH_LABELS = {
   entwurmung: { label: "Entwurmung" },
 };
 
-export const HEALTH_DEFAULT_INTERVAL = { impfung: 26, hufschmied: 7, zahnarzt: 52, entwurmung: 12 };
+export const HEALTH_DEFAULT_INTERVAL = { impfung: 6, hufschmied: 2, zahnarzt: 12, entwurmung: 3 };
 
 export const TASK_TYPES = {
   uebernahme: "Übernahme erforderlich",
@@ -38,6 +38,7 @@ export const TASK_TYPES = {
 
 export function todayISO() { const d = new Date(); return d.toISOString().slice(0, 10); }
 export function addDays(iso, n) { const d = new Date(iso); d.setDate(d.getDate() + n); return d.toISOString().slice(0, 10); }
+export function addMonths(iso, n) { const d = new Date(iso); d.setMonth(d.getMonth() + n); return d.toISOString().slice(0, 10); }
 export function fmtDate(iso) {
   if (!iso) return "";
   const d = new Date(iso + "T00:00:00");
@@ -47,7 +48,13 @@ export function daysUntil(iso) {
   const a = new Date(todayISO()); const b = new Date(iso);
   return Math.round((b - a) / 86400000);
 }
-export function nextDue(item) { return addDays(item.last, item.interval * 7); }
+// Nächster Fälligkeitstermin: direkt gesetztes Datum (item.next) hat Vorrang,
+// sonst berechnet aus letztem Termin + Intervall (in Monaten).
+export function nextDue(item) {
+  if (item.next) return item.next;
+  if (!item.last) return null;
+  return addMonths(item.last, item.interval ?? 6);
+}
 
 export function Pill({ children, bg, fg, style }) {
   return (

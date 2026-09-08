@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { ChevronLeft, Syringe, Scissors, Stethoscope, Pill as PillIcon, Dumbbell, Plus, HeartPulse, Wheat, Pencil, Camera, X } from "lucide-react";
 import { supabase, uploadPhoto } from "../supabaseClient";
-import { Card, SectionTitle, Empty, Pill, Modal, IconBtn, COLOR, fmtDate, daysUntil, nextDue, HEALTH_LABELS, HEALTH_DEFAULT_INTERVAL, inputStyle, labelStyle, btnPrimary, btnGhost, navBtn, todayISO } from "../components/ui";
+import { Card, SectionTitle, Empty, Pill, Modal, IconBtn, COLOR, fmtDate, daysUntil, nextDue, addMonths, HEALTH_LABELS, HEALTH_DEFAULT_INTERVAL, inputStyle, labelStyle, btnPrimary, btnGhost, navBtn, todayISO } from "../components/ui";
 
 const ICONS = { impfung: Syringe, hufschmied: Scissors, zahnarzt: Stethoscope, entwurmung: PillIcon };
 const INTENSITAETEN = ["locker", "normal", "intensiv"];
@@ -60,7 +60,7 @@ export default function Pferde({ user }) {
     <div>
       <SectionTitle right={<IconBtn onClick={() => setShowAddHorse(true)}><Plus size={15} /> Pferd</IconBtn>}>Pferde</SectionTitle>
       {horses.map((h) => {
-        const urgent = Object.entries(h.health || {}).filter(([k]) => HEALTH_LABELS[k]).map(([, v]) => daysUntil(nextDue(v))).sort((a, b) => a - b)[0];
+        const urgent = Object.entries(h.health || {}).filter(([k]) => HEALTH_LABELS[k]).map(([, v]) => nextDue(v)).filter(Boolean).map((due) => daysUntil(due)).sort((a, b) => a - b)[0];
         return (
           <Card key={h.id} onClick={() => setOpen(h.id)} style={{ marginBottom: 10, cursor: "pointer", display: "flex", alignItems: "center", gap: 12 }}>
             <div style={{ width: 42, height: 42, borderRadius: "50%", background: "#F3ECDD", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 20, overflow: "hidden", flexShrink: 0 }}>
@@ -234,10 +234,9 @@ function PferdDetail({ horse, user, onBack, onSave, onDelete }) {
     loadPlans(uid);
   };
 
-  const setLast = (key, date) => {
-    const existing = horse.health?.[key];
-    const interval = existing?.interval ?? HEALTH_DEFAULT_INTERVAL[key];
-    onSave({ health: { ...horse.health, [key]: { last: date, interval } } });
+  const saveHealthItem = (key, { last, interval, next }) => {
+    const item = { last: last || null, interval: interval ? Number(interval) : HEALTH_DEFAULT_INTERVAL[key], next: next || null };
+    onSave({ health: { ...horse.health, [key]: item } });
     setEditKey(null);
   };
 
@@ -313,23 +312,22 @@ function PferdDetail({ horse, user, onBack, onSave, onDelete }) {
                 <div>
                   <div style={{ fontSize: 14, fontWeight: 600, color: COLOR.ink }}>{HEALTH_LABELS[k].label}</div>
                   <div style={{ fontSize: 11.5, color: COLOR.inkSoft }}>
-                    {v ? `zuletzt ${fmtDate(v.last)} · alle ${v.interval} Wo.` : "Noch keine Angabe"}
+                    {v?.last && `zuletzt ${fmtDate(v.last)} · `}
+                    {v ? `alle ${v.interval ?? HEALTH_DEFAULT_INTERVAL[k]} Mon.` : "Noch keine Angabe"}
+                    {due && ` · nächster Termin ${fmtDate(due)}`}
                   </div>
                 </div>
               </div>
-              {v && (
+              {due && (
                 <Pill bg={d < 0 ? COLOR.dringendBg : d <= 7 ? COLOR.uebernommenBg : COLOR.erledigtBg} fg={d < 0 ? COLOR.dringend : d <= 7 ? COLOR.uebernommen : COLOR.erledigt}>
                   {d < 0 ? "überfällig" : d === 0 ? "heute" : `in ${d} Tg.`}
                 </Pill>
               )}
             </div>
             {editKey === k ? (
-              <div style={{ marginTop: 8, display: "flex", gap: 6 }}>
-                <input type="date" defaultValue={v?.last} id={`d-${k}`} style={{ ...inputStyle, marginBottom: 0 }} />
-                <button style={btnPrimary} onClick={() => setLast(k, document.getElementById(`d-${k}`).value)}>OK</button>
-              </div>
+              <HealthEditForm item={v} defaultInterval={HEALTH_DEFAULT_INTERVAL[k]} onSave={(vals) => saveHealthItem(k, vals)} onCancel={() => setEditKey(null)} />
             ) : (
-              <button onClick={() => setEditKey(k)} style={{ ...btnGhost, marginTop: 8 }}>{v ? "Als erledigt markieren" : "Datum eintragen"}</button>
+              <button onClick={() => setEditKey(k)} style={{ ...btnGhost, marginTop: 8 }}>{v ? "Bearbeiten" : "Termin eintragen"}</button>
             )}
           </Card>
         );
@@ -461,6 +459,38 @@ function PhotoViewerModal({ photo, onClose, onUseAsProfile, onDelete }) {
           {onDelete && confirmDelete && <button onClick={onDelete} style={{ ...btnPrimary, background: COLOR.dringend }}>Wirklich löschen?</button>}
         </div>
       )}
+    </div>
+  );
+}
+
+function HealthEditForm({ item, defaultInterval, onSave, onCancel }) {
+  const [last, setLastDate] = useState(item?.last || "");
+  const [interval, setInterval] = useState(item?.interval ?? defaultInterval);
+  const [next, setNext] = useState(item?.next || "");
+  const [overrideNext, setOverrideNext] = useState(!!item?.next);
+
+  return (
+    <div style={{ marginTop: 10 }}>
+      <label style={labelStyle}>Letzter Termin (optional)</label>
+      <input type="date" style={inputStyle} value={last} onChange={(e) => setLastDate(e.target.value)} />
+      <label style={labelStyle}>Intervall (Monate)</label>
+      <input type="number" min="1" style={inputStyle} value={interval} onChange={(e) => setInterval(e.target.value)} />
+      <label style={{ ...labelStyle, display: "flex", alignItems: "center", gap: 6 }}>
+        <input type="checkbox" checked={overrideNext} onChange={(e) => setOverrideNext(e.target.checked)} />
+        Nächsten Termin manuell festlegen
+      </label>
+      {overrideNext && (
+        <input type="date" style={inputStyle} value={next} onChange={(e) => setNext(e.target.value)} />
+      )}
+      {!overrideNext && (
+        <div style={{ fontSize: 11.5, color: COLOR.inkSoft, marginTop: -8, marginBottom: 10 }}>
+          {last ? `Nächster Termin wird automatisch berechnet: ${fmtDate(addMonths(last, interval))}` : "Nächster Termin wird berechnet, sobald ein letzter Termin eingetragen ist."}
+        </div>
+      )}
+      <div style={{ display: "flex", gap: 8 }}>
+        <button style={btnPrimary} onClick={() => onSave({ last, interval, next: overrideNext ? next : "" })}>Speichern</button>
+        <button style={btnGhost} onClick={onCancel}>Abbrechen</button>
+      </div>
     </div>
   );
 }
