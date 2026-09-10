@@ -217,7 +217,6 @@ create table if not exists turnout_plan_settings (
   constraint turnout_plan_settings_singleton check (id = 1)
 );
 insert into turnout_plan_settings (id, start_date) values (1, null) on conflict (id) do nothing;
-on conflict (key) do nothing;
 
 -- Mehrere Personen pro Aufgabe zuweisen können (manche Aufgaben schafft man nicht allein)
 alter table tasks add column if not exists assigned_users text[] default '{}';
