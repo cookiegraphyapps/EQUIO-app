@@ -18,8 +18,21 @@ export default function Aufgaben({ user }) {
   const [categoryFilter, setCategoryFilter] = useState("alle");
   const [showDaily, setShowDaily] = useState(false);
   const [showManageCategories, setShowManageCategories] = useState(false);
+  const [cleanedUp, setCleanedUp] = useState(null); // Liste kürzlich gelöschter alter Aufgaben, zum Anzeigen
+
+  // Aufgaben, die schon 4 Wochen oder länger vorbei sind, endgültig löschen.
+  const cleanupOldTasks = async () => {
+    const cutoff = addDays(todayISO(), -28);
+    const { data: expired } = await supabase.from("tasks").select("id, title, date, date_end")
+      .lt("date", cutoff).or(`date_end.is.null,date_end.lt.${cutoff}`);
+    if (expired && expired.length > 0) {
+      await supabase.from("tasks").delete().in("id", expired.map((x) => x.id));
+      setCleanedUp(expired);
+    }
+  };
 
   const load = async () => {
+    await cleanupOldTasks();
     const [tasksRes, horsesRes, peopleRes, categoriesRes] = await Promise.all([
       supabase.from("tasks").select("*").order("date").order("time"),
       supabase.from("horses").select("*"),
@@ -154,6 +167,22 @@ export default function Aufgaben({ user }) {
 
   return (
     <div>
+      {cleanedUp && cleanedUp.length > 0 && (
+        <Card style={{ marginBottom: 12, background: COLOR.erledigtBg, borderColor: COLOR.erledigt }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
+            <div>
+              <div style={{ fontWeight: 700, fontSize: 13, color: COLOR.erledigt }}>
+                {cleanedUp.length} alte Aufgabe{cleanedUp.length > 1 ? "n" : ""} (älter als 4 Wochen) automatisch gelöscht
+              </div>
+              <div style={{ fontSize: 12, color: COLOR.ink, marginTop: 4 }}>
+                {cleanedUp.slice(0, 8).map((c) => `${c.title} (${fmtDate(c.date)})`).join(" · ")}
+                {cleanedUp.length > 8 && ` · +${cleanedUp.length - 8} weitere`}
+              </div>
+            </div>
+            <button onClick={() => setCleanedUp(null)} style={{ background: "none", border: "none", cursor: "pointer", color: COLOR.erledigt, fontSize: 12, flexShrink: 0 }}>✕</button>
+          </div>
+        </Card>
+      )}
       <SectionTitle right={
         <div style={{ display: "flex", gap: 6 }}>
           <IconBtn onClick={() => setShowAbsence(true)}>🧳 Abwesenheit</IconBtn>
