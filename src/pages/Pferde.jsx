@@ -6,7 +6,7 @@ import { Card, SectionTitle, Empty, Pill, Modal, IconBtn, COLOR, fmtDate, daysUn
 const ICONS = { impfung: Syringe, hufschmied: Scissors, zahnarzt: Stethoscope, entwurmung: PillIcon };
 const INTENSITAETEN = ["locker", "normal", "intensiv"];
 
-export default function Pferde({ user }) {
+export default function Pferde({ user, isAdmin }) {
   const [loading, setLoading] = useState(true);
   const [horses, setHorses] = useState([]);
   const [open, setOpen] = useState(null);
@@ -41,6 +41,7 @@ export default function Pferde({ user }) {
       <PferdDetail
         horse={horse}
         user={user}
+        isAdmin={isAdmin}
         onBack={() => setOpen(null)}
         onSave={async (updates) => {
           const { error } = await supabase.from("horses").update(updates).eq("id", horse.id);
@@ -111,7 +112,7 @@ function AddHorseModal({ error, onClose, onSave }) {
   );
 }
 
-function PferdDetail({ horse, user, onBack, onSave, onDelete }) {
+function PferdDetail({ horse, user, isAdmin, onBack, onSave, onDelete }) {
   const [editKey, setEditKey] = useState(null);
   const [editingInfo, setEditingInfo] = useState(false);
   const [confirmDeleteHorse, setConfirmDeleteHorse] = useState(false);
@@ -563,18 +564,20 @@ function PferdDetail({ horse, user, onBack, onSave, onDelete }) {
         />
       )}
 
-      <div style={{ marginTop: 24, textAlign: "center" }}>
-        {confirmDeleteHorse ? (
-          <div style={{ display: "flex", gap: 8, justifyContent: "center" }}>
-            <button onClick={onDelete} style={{ ...btnPrimary, background: COLOR.dringend }}>Wirklich löschen</button>
-            <button onClick={() => setConfirmDeleteHorse(false)} style={btnGhost}>Abbrechen</button>
-          </div>
-        ) : (
-          <button onClick={() => setConfirmDeleteHorse(true)} style={{ background: "none", border: "none", cursor: "pointer", color: COLOR.dringend, fontSize: 12 }}>
-            {horse.name} entfernen
-          </button>
-        )}
-      </div>
+      {isAdmin && (
+        <div style={{ marginTop: 24, textAlign: "center" }}>
+          {confirmDeleteHorse ? (
+            <div style={{ display: "flex", gap: 8, justifyContent: "center" }}>
+              <button onClick={onDelete} style={{ ...btnPrimary, background: COLOR.dringend }}>Wirklich löschen</button>
+              <button onClick={() => setConfirmDeleteHorse(false)} style={btnGhost}>Abbrechen</button>
+            </div>
+          ) : (
+            <button onClick={() => setConfirmDeleteHorse(true)} style={{ background: "none", border: "none", cursor: "pointer", color: COLOR.dringend, fontSize: 12 }}>
+              {horse.name} entfernen
+            </button>
+          )}
+        </div>
+      )}
     </div>
   );
 }

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { HashRouter, Routes, Route, useNavigate, useLocation } from "react-router-dom";
-import { Home, ListChecks, CalendarDays, Wallet } from "lucide-react";
+import { Home, ListChecks, CalendarDays, Wallet, Settings, Trash2 } from "lucide-react";
 import { supabase } from "./supabaseClient";
 import { COLOR, FONT_IMPORT, wrap, inputStyle, btnPrimary } from "./components/ui";
 import Login from "./pages/Login";
@@ -80,33 +80,89 @@ function MainApp({ profile }) {
   return (
     <div style={{ ...wrap, paddingBottom: 84 }}>
       <style>{FONT_IMPORT}</style>
-      <Header name={profile.name} />
+      <Header profile={profile} />
       <Routes>
         <Route path="/" element={<Dashboard user={profile.name} />} />
-        <Route path="/aufgaben" element={<Aufgaben user={profile.name} />} />
+        <Route path="/aufgaben" element={<Aufgaben user={profile.name} isAdmin={profile.is_admin} />} />
         <Route path="/kalender" element={<Kalender user={profile.name} />} />
-        <Route path="/pferde" element={<Pferde user={profile.name} />} />
-        <Route path="/finanzen" element={<Finanzen user={profile.name} />} />
+        <Route path="/pferde" element={<Pferde user={profile.name} isAdmin={profile.is_admin} />} />
+        <Route path="/finanzen" element={<Finanzen user={profile.name} isAdmin={profile.is_admin} />} />
       </Routes>
       <BottomNav />
     </div>
   );
 }
 
-function Header({ name }) {
+function Header({ profile }) {
+  const { name, is_admin } = profile;
   const hour = new Date().getHours();
   const greet = hour < 11 ? "Guten Morgen" : hour < 18 ? "Hallo" : "Guten Abend";
   const signOut = () => supabase.auth.signOut();
+  const [showAdmin, setShowAdmin] = useState(false);
   return (
     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "18px 0 4px" }}>
       <div>
         <div style={{ fontSize: 11, letterSpacing: 0.3, color: COLOR.inkSoft }}>EQUIO · Die Eichenponys</div>
         <div style={{ fontFamily: "Fraunces, serif", fontSize: 21, fontWeight: 600, color: COLOR.ink }}>{greet}, {name} 👋</div>
       </div>
-      <button onClick={signOut} title="Abmelden" style={{
-        width: 36, height: 36, borderRadius: "50%", background: COLOR.ink, color: "#fff", border: "none",
-        fontFamily: "Fraunces, serif", fontWeight: 600, cursor: "pointer",
-      }}>{name[0]}</button>
+      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        {is_admin && (
+          <button onClick={() => setShowAdmin(true)} title="Verwaltung" style={{
+            width: 36, height: 36, borderRadius: "50%", background: "#fff", border: `1px solid ${COLOR.line}`,
+            color: COLOR.inkSoft, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center",
+          }}><Settings size={16} /></button>
+        )}
+        <button onClick={signOut} title="Abmelden" style={{
+          width: 36, height: 36, borderRadius: "50%", background: COLOR.ink, color: "#fff", border: "none",
+          fontFamily: "Fraunces, serif", fontWeight: 600, cursor: "pointer",
+        }}>{name[0]}</button>
+      </div>
+      {showAdmin && <AdminModal onClose={() => setShowAdmin(false)} />}
+    </div>
+  );
+}
+
+function AdminModal({ onClose }) {
+  const [people, setPeople] = useState([]);
+  const [confirmId, setConfirmId] = useState(null);
+
+  const load = async () => {
+    const { data } = await supabase.from("profiles").select("*").order("name");
+    setPeople(data ?? []);
+  };
+  useEffect(() => { load(); }, []);
+
+  const removePerson = async (id) => {
+    await supabase.from("profiles").delete().eq("id", id);
+    setConfirmId(null);
+    load();
+  };
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(20,20,15,0.5)", zIndex: 100, display: "flex", alignItems: "flex-end", justifyContent: "center" }} onClick={onClose}>
+      <div onClick={(e) => e.stopPropagation()} style={{ background: "#fff", borderRadius: "18px 18px 0 0", padding: 20, width: "100%", maxWidth: 480, maxHeight: "75vh", overflowY: "auto" }}>
+        <div style={{ fontFamily: "Fraunces, serif", fontSize: 18, fontWeight: 700, color: COLOR.ink, marginBottom: 4 }}>Verwaltung</div>
+        <div style={{ fontSize: 12, color: COLOR.inkSoft, marginBottom: 14 }}>Nutzer:innen entfernen</div>
+        <div style={{ fontSize: 11.5, color: COLOR.inkSoft, marginBottom: 14 }}>
+          Entfernt die Person aus der App (Name verschwindet aus Auswahllisten). Der Login-Zugang selbst bleibt bestehen und muss bei Bedarf zusätzlich im Supabase-Dashboard gelöscht werden.
+        </div>
+        {people.map((p) => (
+          <div key={p.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "9px 0", borderBottom: `1px solid ${COLOR.line}` }}>
+            <span style={{ fontSize: 14, color: COLOR.ink }}>{p.name}{p.is_admin && <span style={{ fontSize: 11, color: COLOR.inkSoft }}> · Admin</span>}</span>
+            {confirmId === p.id ? (
+              <div style={{ display: "flex", gap: 6 }}>
+                <button onClick={() => removePerson(p.id)} style={{ background: "none", border: "none", color: COLOR.dringend, cursor: "pointer", fontSize: 12.5, fontWeight: 600 }}>Entfernen</button>
+                <button onClick={() => setConfirmId(null)} style={{ background: "none", border: "none", color: COLOR.inkSoft, cursor: "pointer", fontSize: 12.5 }}>Abbrechen</button>
+              </div>
+            ) : (
+              <button onClick={() => setConfirmId(p.id)} style={{ background: "none", border: "none", color: COLOR.inkSoft, cursor: "pointer" }}>
+                <Trash2 size={14} />
+              </button>
+            )}
+          </div>
+        ))}
+        <button onClick={onClose} style={{ ...btnPrimary, width: "100%", padding: "11px 0", marginTop: 16 }}>Schließen</button>
+      </div>
     </div>
   );
 }

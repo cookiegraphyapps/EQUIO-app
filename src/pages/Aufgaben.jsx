@@ -3,10 +3,10 @@ import { AlertTriangle, CheckCircle2, Plus, Repeat, Pencil, ChevronDown, Chevron
 import { supabase } from "../supabaseClient";
 import {
   Card, SectionTitle, Empty, Pill, Modal, IconBtn, COLOR,
-  todayISO, addDays, fmtDate, inputStyle, labelStyle, btnPrimary, btnGhost, TASK_TYPES,
+  todayISO, addDays, addMonths, fmtDate, inputStyle, labelStyle, btnPrimary, btnGhost, TASK_TYPES,
 } from "../components/ui";
 
-export default function Aufgaben({ user }) {
+export default function Aufgaben({ user, isAdmin }) {
   const [loading, setLoading] = useState(true);
   const [tasks, setTasks] = useState([]);
   const [horses, setHorses] = useState([]);
@@ -85,7 +85,9 @@ export default function Aufgaben({ user }) {
       let d = data.date;
       while (d <= data.recurEnd) {
         rows.push({ title: data.title, description: data.desc, type: data.type, date: d, date_end: null, time: data.time || null, horse_ids: data.horseIds, recurring: true, series_id: seriesId, assigned_users: data.assignTo, done: doneIfAssigned, category: data.category });
-        d = addDays(d, 1);
+        if (data.recurFreq === "weekly") d = addDays(d, 7);
+        else if (data.recurFreq === "monthly") d = addMonths(d, 1);
+        else d = addDays(d, 1);
       }
     } else {
       const dateEnd = data.mode === "range" && data.rangeEnd && data.rangeEnd > data.date ? data.rangeEnd : null;
@@ -200,9 +202,11 @@ export default function Aufgaben({ user }) {
             background: categoryFilter === c.key ? "#F3ECDD" : "#fff", fontSize: 12, cursor: "pointer", color: COLOR.ink,
           }}>{c.label}</button>
         ))}
-        <button onClick={() => setShowManageCategories(true)} style={{ background: "none", border: "none", cursor: "pointer", color: COLOR.inkSoft, padding: 4, display: "flex" }}>
-          <Settings size={15} />
-        </button>
+        {isAdmin && (
+          <button onClick={() => setShowManageCategories(true)} style={{ background: "none", border: "none", cursor: "pointer", color: COLOR.inkSoft, padding: 4, display: "flex" }}>
+            <Settings size={15} />
+          </button>
+        )}
       </div>
       {upcoming.length === 0 && <Empty text="Keine Aufgaben geplant." />}
       {upcoming.map((x) => (
@@ -391,6 +395,7 @@ function NewTaskModal({ horses, people, categories, editing, onClose, onSave, on
   const [mode, setMode] = useState("single"); // single | range | recurring
   const [rangeEnd, setRangeEnd] = useState(addDays(todayISO(), 2));
   const [recurEnd, setRecurEnd] = useState(addDays(todayISO(), 6));
+  const [recurFreq, setRecurFreq] = useState("daily"); // daily | weekly | monthly
   const [assignTo, setAssignTo] = useState(editing?.assigned_users || []);
   const [customName, setCustomName] = useState("");
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -447,7 +452,7 @@ function NewTaskModal({ horses, people, categories, editing, onClose, onSave, on
           <div style={{ display: "flex", gap: 6, marginBottom: 10 }}>
             <button type="button" onClick={() => setMode("single")} style={{ ...modeBtn, ...(mode === "single" ? { background: "#F3ECDD", borderColor: COLOR.accent } : {}) }}>Einzeltag</button>
             <button type="button" onClick={() => setMode("range")} style={{ ...modeBtn, ...(mode === "range" ? { background: "#F3ECDD", borderColor: COLOR.accent } : {}) }}>Zeitraum</button>
-            <button type="button" onClick={() => setMode("recurring")} style={{ ...modeBtn, ...(mode === "recurring" ? { background: "#F3ECDD", borderColor: COLOR.accent } : {}) }}>Täglich wiederholen</button>
+            <button type="button" onClick={() => setMode("recurring")} style={{ ...modeBtn, ...(mode === "recurring" ? { background: "#F3ECDD", borderColor: COLOR.accent } : {}) }}>Wiederholen</button>
           </div>
           <div style={{ display: "flex", gap: 10 }}>
             <div style={{ flex: 1 }}>
@@ -468,10 +473,16 @@ function NewTaskModal({ horses, people, categories, editing, onClose, onSave, on
         </>
       )}
       {!editing && mode === "recurring" && (
-        <label style={labelStyle}>Wiederholen bis</label>
-      )}
-      {!editing && mode === "recurring" && (
-        <input type="date" style={inputStyle} value={recurEnd} onChange={(e) => setRecurEnd(e.target.value)} />
+        <>
+          <label style={labelStyle}>Rhythmus</label>
+          <div style={{ display: "flex", gap: 6, marginBottom: 10 }}>
+            <button type="button" onClick={() => setRecurFreq("daily")} style={{ ...modeBtn, ...(recurFreq === "daily" ? { background: "#F3ECDD", borderColor: COLOR.accent } : {}) }}>Täglich</button>
+            <button type="button" onClick={() => setRecurFreq("weekly")} style={{ ...modeBtn, ...(recurFreq === "weekly" ? { background: "#F3ECDD", borderColor: COLOR.accent } : {}) }}>Wöchentlich</button>
+            <button type="button" onClick={() => setRecurFreq("monthly")} style={{ ...modeBtn, ...(recurFreq === "monthly" ? { background: "#F3ECDD", borderColor: COLOR.accent } : {}) }}>Monatlich</button>
+          </div>
+          <label style={labelStyle}>Wiederholen bis</label>
+          <input type="date" style={inputStyle} value={recurEnd} onChange={(e) => setRecurEnd(e.target.value)} />
+        </>
       )}
       {editing && (
         <div style={{ display: "flex", gap: 10 }}>
@@ -518,7 +529,7 @@ function NewTaskModal({ horses, people, categories, editing, onClose, onSave, on
       )}
       <button
         disabled={!title.trim()}
-        onClick={() => onSave({ title: title.trim(), desc, type, date, dateEnd, time, horseIds, mode, rangeEnd, recurEnd, assignTo, scope, category })}
+        onClick={() => onSave({ title: title.trim(), desc, type, date, dateEnd, time, horseIds, mode, rangeEnd, recurEnd, recurFreq, assignTo, scope, category })}
         style={{ ...btnPrimary, width: "100%", padding: "11px 0", marginTop: 6, opacity: title.trim() ? 1 : 0.5 }}
       >{editing ? "Speichern" : "Aufgabe speichern"}</button>
       {editing && (

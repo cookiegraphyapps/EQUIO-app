@@ -10,6 +10,9 @@ create table if not exists profiles (
   name text not null,
   created_at timestamptz default now()
 );
+alter table profiles add column if not exists is_admin boolean default false;
+update profiles set is_admin = true
+  where id = (select id from auth.users where email = 'corinna97willems@gmail.com');
 
 -- Pferde (gemeinsam sichtbar)
 create table if not exists horses (
@@ -247,13 +250,17 @@ alter table news enable row level security;
 alter table horse_expenses enable row level security;
 alter table task_categories enable row level security;
 
--- Profile: jede:r sieht alle Namen (für Zuordnung), bearbeitet nur sich selbst
+-- Profile: jede:r sieht alle Namen (für Zuordnung), bearbeitet nur sich selbst.
+-- Entfernen (löschen) eines Profils nur durch Admin.
 drop policy if exists "profiles_select_all" on profiles;
 drop policy if exists "profiles_insert_own" on profiles;
 drop policy if exists "profiles_update_own" on profiles;
+drop policy if exists "profiles_delete_admin" on profiles;
 create policy "profiles_select_all" on profiles for select using (auth.role() = 'authenticated');
 create policy "profiles_insert_own" on profiles for insert with check (auth.uid() = id);
 create policy "profiles_update_own" on profiles for update using (auth.uid() = id);
+create policy "profiles_delete_admin" on profiles for delete
+  using (exists (select 1 from profiles p2 where p2.id = auth.uid() and p2.is_admin = true));
 
 -- Gemeinsame Tabellen: alle angemeldeten Nutzer:innen dürfen lesen & schreiben
 drop policy if exists "horses_all" on horses;
@@ -267,17 +274,46 @@ drop policy if exists "medications_all" on medications;
 drop policy if exists "weights_all" on weights;
 drop policy if exists "news_all" on news;
 drop policy if exists "task_categories_all" on task_categories;
-create policy "horses_all" on horses for all using (auth.role() = 'authenticated') with check (auth.role() = 'authenticated');
 create policy "tasks_all" on tasks for all using (auth.role() = 'authenticated') with check (auth.role() = 'authenticated');
 create policy "events_all" on events for all using (auth.role() = 'authenticated') with check (auth.role() = 'authenticated');
-create policy "expenses_all" on expenses for all using (auth.role() = 'authenticated') with check (auth.role() = 'authenticated');
 create policy "expense_splits_all" on expense_splits for all using (auth.role() = 'authenticated') with check (auth.role() = 'authenticated');
 create policy "trainings_all" on trainings for all using (auth.role() = 'authenticated') with check (auth.role() = 'authenticated');
 create policy "health_notes_all" on health_notes for all using (auth.role() = 'authenticated') with check (auth.role() = 'authenticated');
 create policy "medications_all" on medications for all using (auth.role() = 'authenticated') with check (auth.role() = 'authenticated');
 create policy "weights_all" on weights for all using (auth.role() = 'authenticated') with check (auth.role() = 'authenticated');
 create policy "news_all" on news for all using (auth.role() = 'authenticated') with check (auth.role() = 'authenticated');
-create policy "task_categories_all" on task_categories for all using (auth.role() = 'authenticated') with check (auth.role() = 'authenticated');
+
+-- Pferde: alle dürfen lesen/anlegen/bearbeiten, aber nur Admin darf löschen
+drop policy if exists "horses_select" on horses;
+drop policy if exists "horses_insert" on horses;
+drop policy if exists "horses_update" on horses;
+drop policy if exists "horses_delete_admin" on horses;
+create policy "horses_select" on horses for select using (auth.role() = 'authenticated');
+create policy "horses_insert" on horses for insert with check (auth.role() = 'authenticated');
+create policy "horses_update" on horses for update using (auth.role() = 'authenticated');
+create policy "horses_delete_admin" on horses for delete
+  using (exists (select 1 from profiles p2 where p2.id = auth.uid() and p2.is_admin = true));
+
+-- Ausgaben: alle dürfen lesen/anlegen/bearbeiten, aber nur Admin darf löschen
+drop policy if exists "expenses_select" on expenses;
+drop policy if exists "expenses_insert" on expenses;
+drop policy if exists "expenses_update" on expenses;
+drop policy if exists "expenses_delete_admin" on expenses;
+create policy "expenses_select" on expenses for select using (auth.role() = 'authenticated');
+create policy "expenses_insert" on expenses for insert with check (auth.role() = 'authenticated');
+create policy "expenses_update" on expenses for update using (auth.role() = 'authenticated');
+create policy "expenses_delete_admin" on expenses for delete
+  using (exists (select 1 from profiles p2 where p2.id = auth.uid() and p2.is_admin = true));
+
+-- Kategorien: alle dürfen lesen, aber nur Admin darf anlegen/löschen (Verwalten-Menü)
+drop policy if exists "task_categories_select" on task_categories;
+drop policy if exists "task_categories_insert_admin" on task_categories;
+drop policy if exists "task_categories_delete_admin" on task_categories;
+create policy "task_categories_select" on task_categories for select using (auth.role() = 'authenticated');
+create policy "task_categories_insert_admin" on task_categories for insert
+  with check (exists (select 1 from profiles p2 where p2.id = auth.uid() and p2.is_admin = true));
+create policy "task_categories_delete_admin" on task_categories for delete
+  using (exists (select 1 from profiles p2 where p2.id = auth.uid() and p2.is_admin = true));
 
 -- Private Termine, Trainingsplanung & Rechnungen: nur der/die Ersteller:in sieht & bearbeitet eigene Einträge
 drop policy if exists "personal_events_own" on personal_events;

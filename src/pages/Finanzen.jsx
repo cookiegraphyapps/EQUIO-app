@@ -3,7 +3,7 @@ import { CheckCircle2, Plus } from "lucide-react";
 import { supabase } from "../supabaseClient";
 import { Card, SectionTitle, IconBtn, Modal, COLOR, fmtDate, todayISO, inputStyle, labelStyle, btnPrimary, btnGhost } from "../components/ui";
 
-export default function Finanzen({ user }) {
+export default function Finanzen({ user, isAdmin }) {
   const [expenses, setExpenses] = useState([]);
   const [people, setPeople] = useState([]);
   const [horses, setHorses] = useState([]);
@@ -95,13 +95,15 @@ export default function Finanzen({ user }) {
               </div>
             ))}
           </div>
-          {confirmDeleteId === ex.id ? (
-            <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
-              <button onClick={() => deleteExpense(ex.id)} style={{ ...btnPrimary, background: COLOR.dringend }}>Wirklich löschen</button>
-              <button onClick={() => setConfirmDeleteId(null)} style={btnGhost}>Abbrechen</button>
-            </div>
-          ) : (
-            <button onClick={() => setConfirmDeleteId(ex.id)} style={{ ...btnGhost, marginTop: 10, color: COLOR.dringend }}>Ausgabe löschen</button>
+          {isAdmin && (
+            confirmDeleteId === ex.id ? (
+              <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+                <button onClick={() => deleteExpense(ex.id)} style={{ ...btnPrimary, background: COLOR.dringend }}>Wirklich löschen</button>
+                <button onClick={() => setConfirmDeleteId(null)} style={btnGhost}>Abbrechen</button>
+              </div>
+            ) : (
+              <button onClick={() => setConfirmDeleteId(ex.id)} style={{ ...btnGhost, marginTop: 10, color: COLOR.dringend }}>Ausgabe löschen</button>
+            )
           )}
         </Card>
       ))}
