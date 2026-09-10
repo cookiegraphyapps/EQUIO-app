@@ -45,7 +45,7 @@ export default function Dashboard({ user }) {
     (async () => {
       const t = todayISO();
       const [tasksRes, eventsRes, horsesRes, expensesRes] = await Promise.all([
-        supabase.from("tasks").select("*").lte("date", addDays(t, 1)).order("date"),
+        supabase.from("tasks").select("*").lte("date", addDays(t, 7)).order("date"),
         supabase.from("events").select("*").eq("date", t),
         supabase.from("horses").select("*"),
         supabase.from("expenses").select("*, expense_splits(*)"),
@@ -96,6 +96,11 @@ export default function Dashboard({ user }) {
     id: `bday-${h.id}`, title: `🎂 Geburtstag ${h.name}`, time: "",
   }));
   const todayEvents = [...events, ...tasks.filter((x) => x.type === "info" && x.date === t), ...birthdaysToday].sort((a, b) => (a.time || "").localeCompare(b.time || ""));
+
+  const next7 = tasks
+    .filter((x) => x.type !== "info" && !x.done && (x.category || "allgemein") !== "taeglich")
+    .filter((x) => x.date > t && x.date <= addDays(t, 7))
+    .sort((a, b) => a.date.localeCompare(b.date));
 
   const dueSoon = [];
   horses.forEach((h) => Object.entries(h.health || {}).forEach(([k, v]) => {
@@ -153,6 +158,24 @@ export default function Dashboard({ user }) {
           </div>
         </Card>
       )}
+
+      <SectionTitle>📆 Nächste 7 Tage</SectionTitle>
+      {next7.length === 0 && <Empty text="Nichts Größeres in den nächsten 7 Tagen." />}
+      {next7.map((x) => {
+        const assignedUsers = x.assigned_users || [];
+        const isOpen = assignedUsers.length === 0;
+        return (
+          <Card key={x.id} style={{ marginBottom: 8, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <div>
+              <div style={{ fontSize: 14, color: COLOR.ink, fontWeight: 600 }}>{x.title}</div>
+              <div style={{ fontSize: 11.5, color: COLOR.inkSoft, marginTop: 2 }}>{fmtDate(x.date)}</div>
+            </div>
+            {isOpen
+              ? <Pill bg={COLOR.dringendBg} fg={COLOR.dringend}>offen</Pill>
+              : <Pill bg={COLOR.uebernommenBg} fg={COLOR.uebernommen}>{assignedUsers.join(", ")}</Pill>}
+          </Card>
+        );
+      })}
 
       <SectionTitle>📋 Meine Aufgaben</SectionTitle>
       {myTasks.length === 0 && <Empty text="Nichts Offenes für dich – schönen Tag!" />}
