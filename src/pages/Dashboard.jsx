@@ -1,7 +1,14 @@
 import { useEffect, useState } from "react";
-import { AlertTriangle, CheckCircle2 } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Trash2 } from "lucide-react";
 import { supabase } from "../supabaseClient";
-import { Card, SectionTitle, Empty, Pill, COLOR, todayISO, addDays, fmtDate, daysUntil, nextDue, HEALTH_LABELS } from "../components/ui";
+import { Card, SectionTitle, Empty, Pill, COLOR, todayISO, addDays, fmtDate, daysUntil, nextDue, dateToISO, HEALTH_LABELS, inputStyle, btnPrimary } from "../components/ui";
+
+function relativeDay(timestamp) {
+  const diff = daysUntil(dateToISO(new Date(timestamp))) * -1; // Tage in der Vergangenheit, positiv
+  if (diff <= 0) return "heute";
+  if (diff === 1) return "gestern";
+  return `vor ${diff} Tagen`;
+}
 
 export default function Dashboard({ user }) {
   const [loading, setLoading] = useState(true);
@@ -9,6 +16,30 @@ export default function Dashboard({ user }) {
   const [events, setEvents] = useState([]);
   const [horses, setHorses] = useState([]);
   const [expenses, setExpenses] = useState([]);
+  const [news, setNews] = useState([]);
+  const [newsText, setNewsText] = useState("");
+  const [postingNews, setPostingNews] = useState(false);
+
+  const loadNews = async () => {
+    const cutoff = new Date(Date.now() - 5 * 86400000).toISOString();
+    const { data } = await supabase.from("news").select("*").gte("created_at", cutoff).order("created_at", { ascending: false });
+    setNews(data ?? []);
+  };
+
+  const postNews = async () => {
+    const text = newsText.trim();
+    if (!text) return;
+    setPostingNews(true);
+    await supabase.from("news").insert({ user_name: user, text });
+    setNewsText("");
+    setPostingNews(false);
+    loadNews();
+  };
+
+  const deleteNews = async (id) => {
+    await supabase.from("news").delete().eq("id", id);
+    loadNews();
+  };
 
   useEffect(() => {
     (async () => {
@@ -51,6 +82,7 @@ export default function Dashboard({ user }) {
       setEvents(eventsRes.data ?? []);
       setHorses(horsesData);
       setExpenses(expensesRes.data ?? []);
+      loadNews();
       setLoading(false);
     })();
   }, []);
@@ -82,6 +114,34 @@ export default function Dashboard({ user }) {
 
   return (
     <div>
+      <SectionTitle>📢 Neuigkeiten</SectionTitle>
+      <Card style={{ marginBottom: 10 }}>
+        <div style={{ display: "flex", gap: 8 }}>
+          <input
+            style={{ ...inputStyle, marginBottom: 0, flex: 1 }}
+            value={newsText}
+            onChange={(e) => setNewsText(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") postNews(); }}
+            placeholder="Kurze Nachricht an alle …"
+          />
+          <button onClick={postNews} disabled={postingNews || !newsText.trim()} style={{ ...btnPrimary, opacity: newsText.trim() ? 1 : 0.5 }}>Posten</button>
+        </div>
+      </Card>
+      {news.length === 0 && <Empty text="Keine aktuellen Neuigkeiten." />}
+      {news.map((n) => (
+        <Card key={n.id} style={{ marginBottom: 8, display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
+          <div>
+            <div style={{ fontSize: 14, color: COLOR.ink }}>{n.text}</div>
+            <div style={{ fontSize: 11.5, color: COLOR.inkSoft, marginTop: 3 }}>{n.user_name} · {relativeDay(n.created_at)}</div>
+          </div>
+          {n.user_name === user && (
+            <button onClick={() => deleteNews(n.id)} style={{ background: "none", border: "none", padding: 2, cursor: "pointer", color: COLOR.inkSoft, flexShrink: 0 }}>
+              <Trash2 size={14} />
+            </button>
+          )}
+        </Card>
+      ))}
+
       {openTasks.length > 0 && (
         <Card style={{ borderColor: COLOR.dringend, background: COLOR.dringendBg, marginTop: 14 }}>
           <div style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
