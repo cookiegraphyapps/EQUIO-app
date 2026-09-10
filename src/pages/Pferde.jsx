@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { ChevronLeft, Syringe, Scissors, Stethoscope, Pill as PillIcon, Dumbbell, Plus, HeartPulse, Wheat, Pencil, Camera, X, Scale } from "lucide-react";
+import { ChevronLeft, Syringe, Scissors, Stethoscope, Pill as PillIcon, Dumbbell, Plus, HeartPulse, Wheat, Pencil, Camera, X, Scale, Wallet } from "lucide-react";
 import { supabase, uploadPhoto } from "../supabaseClient";
 import { Card, SectionTitle, Empty, Pill, Modal, IconBtn, COLOR, fmtDate, daysUntil, nextDue, addMonths, addDays, HEALTH_LABELS, HEALTH_DEFAULT_INTERVAL, HEALTH_INTERVAL_UNIT, inputStyle, labelStyle, btnPrimary, btnGhost, navBtn, todayISO } from "../components/ui";
 
@@ -132,6 +132,10 @@ function PferdDetail({ horse, user, onBack, onSave, onDelete }) {
   const [weights, setWeights] = useState([]);
   const [showNewWeight, setShowNewWeight] = useState(false);
   const [showWeightHistory, setShowWeightHistory] = useState(false);
+  const [sharedExpenses, setSharedExpenses] = useState([]);
+  const [privateExpenses, setPrivateExpenses] = useState([]);
+  const [showNewExpense, setShowNewExpense] = useState(false);
+  const [confirmDeleteExpId, setConfirmDeleteExpId] = useState(null);
   const [feedPlan, setFeedPlan] = useState(horse.feed_plan || "");
   const [editingFeedPlan, setEditingFeedPlan] = useState(false);
   const [savingFeedPlan, setSavingFeedPlan] = useState(false);
@@ -212,15 +216,24 @@ function PferdDetail({ horse, user, onBack, onSave, onDelete }) {
     const { data } = await supabase.from("training_plans").select("*").eq("horse_id", horse.id).eq("user_id", currentUid).order("date");
     setPlans(data ?? []);
   };
+  const loadSharedExpenses = async () => {
+    const { data } = await supabase.from("expenses").select("*").eq("horse_id", horse.id).order("date", { ascending: false });
+    setSharedExpenses(data ?? []);
+  };
+  const loadPrivateExpenses = async (currentUid) => {
+    const { data } = await supabase.from("horse_expenses").select("*").eq("horse_id", horse.id).eq("user_id", currentUid).order("date", { ascending: false });
+    setPrivateExpenses(data ?? []);
+  };
   useEffect(() => {
     loadTrainings();
     loadHealthNotes();
     loadMedications();
     loadWeights();
+    loadSharedExpenses();
     supabase.auth.getUser().then(({ data }) => {
       const currentUid = data?.user?.id;
       setUid(currentUid);
-      if (currentUid) loadPlans(currentUid);
+      if (currentUid) { loadPlans(currentUid); loadPrivateExpenses(currentUid); }
     });
   }, [horse.id]);
 
@@ -234,6 +247,22 @@ function PferdDetail({ horse, user, onBack, onSave, onDelete }) {
     await supabase.from("training_plans").insert({ horse_id: horse.id, user_id: uid, date: p.date, plan: p.plan });
     setShowNewPlan(false);
     loadPlans(uid);
+  };
+  const addPrivateExpense = async (e) => {
+    if (!uid) return;
+    let photoUrl = null;
+    if (e.photoFile) photoUrl = await uploadPhoto(e.photoFile, `${horse.id}/rechnungen`);
+    await supabase.from("horse_expenses").insert({
+      horse_id: horse.id, user_id: uid, user_name: user, date: e.date, description: e.description,
+      amount: Number(e.amount), note: e.note || null, photo_url: photoUrl,
+    });
+    setShowNewExpense(false);
+    loadPrivateExpenses(uid);
+  };
+  const deletePrivateExpense = async (id) => {
+    await supabase.from("horse_expenses").delete().eq("id", id);
+    setConfirmDeleteExpId(null);
+    loadPrivateExpenses(uid);
   };
 
   const saveHealthItem = (key, { last, interval, next }) => {
@@ -464,11 +493,66 @@ function PferdDetail({ horse, user, onBack, onSave, onDelete }) {
         </Card>
       ))}
 
+      <SectionTitle>
+        <Wallet size={15} style={{ marginRight: 5, verticalAlign: -2 }} />Gemeinsame Ausgaben für {horse.name}
+      </SectionTitle>
+      {sharedExpenses.length === 0 && <Empty text="Noch keine Ausgaben für dieses Pferd." />}
+      {sharedExpenses.map((ex) => (
+        <Card key={ex.id} style={{ marginBottom: 8 }}>
+          <div style={{ display: "flex", justifyContent: "space-between" }}>
+            <div>
+              <div style={{ fontSize: 13.5, fontWeight: 600, color: COLOR.ink }}>{ex.description}</div>
+              <div style={{ fontSize: 11.5, color: COLOR.inkSoft }}>bezahlt von {ex.paid_by} · {fmtDate(ex.date)}</div>
+            </div>
+            <div style={{ fontFamily: "Fraunces, serif", fontWeight: 700, fontSize: 14, color: COLOR.ink }}>{Number(ex.amount).toFixed(2)} €</div>
+          </div>
+        </Card>
+      ))}
+      <div style={{ fontSize: 11.5, color: COLOR.inkSoft, marginTop: -4, marginBottom: 16 }}>
+        Diese Ausgaben werden automatisch aus „Finanzen" übernommen, wenn dort {horse.name} als Kategorie ausgewählt wird.
+      </div>
+
+      <SectionTitle right={<IconBtn onClick={() => setShowNewExpense(true)}><Plus size={15} /> Rechnung</IconBtn>}>
+        <Wallet size={15} style={{ marginRight: 5, verticalAlign: -2 }} />Meine privaten Rechnungen
+      </SectionTitle>
+      <div style={{ fontSize: 11.5, color: COLOR.inkSoft, marginTop: -6, marginBottom: 10 }}>
+        Nur für dich sichtbar – z. B. eigene Tierarzt- oder Hufschmiedrechnung.
+      </div>
+      {privateExpenses.length === 0 && <Empty text="Noch keine eigenen Rechnungen." />}
+      {privateExpenses.map((ex) => (
+        <Card key={ex.id} style={{ marginBottom: 8 }}>
+          <div style={{ display: "flex", gap: 10 }}>
+            {ex.photo_url && (
+              <button onClick={() => setViewerPhoto({ url: ex.photo_url })} style={{ border: "none", padding: 0, cursor: "pointer", width: 52, height: 52, borderRadius: 8, overflow: "hidden", flexShrink: 0, background: "#F3ECDD" }}>
+                <img src={ex.photo_url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+              </button>
+            )}
+            <div style={{ flex: 1 }}>
+              <div style={{ display: "flex", justifyContent: "space-between" }}>
+                <div style={{ fontSize: 13.5, fontWeight: 600, color: COLOR.ink }}>{ex.description}</div>
+                <div style={{ fontFamily: "Fraunces, serif", fontWeight: 700, fontSize: 14, color: COLOR.ink }}>{Number(ex.amount).toFixed(2)} €</div>
+              </div>
+              <div style={{ fontSize: 11.5, color: COLOR.inkSoft }}>{fmtDate(ex.date)}</div>
+              {ex.note && <div style={{ fontSize: 12.5, color: COLOR.ink, marginTop: 2 }}>{ex.note}</div>}
+            </div>
+          </div>
+          {confirmDeleteExpId === ex.id ? (
+            <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+              <button onClick={() => deletePrivateExpense(ex.id)} style={{ ...btnPrimary, background: COLOR.dringend }}>Wirklich löschen</button>
+              <button onClick={() => setConfirmDeleteExpId(null)} style={btnGhost}>Abbrechen</button>
+            </div>
+          ) : (
+            <button onClick={() => setConfirmDeleteExpId(ex.id)} style={{ ...btnGhost, marginTop: 8 }}>Löschen</button>
+          )}
+        </Card>
+      ))}
+
       {showNewTraining && <NewTrainingModal onClose={() => setShowNewTraining(false)} onSave={addTraining} />}
       {showNewPlan && <NewPlanModal onClose={() => setShowNewPlan(false)} onSave={addPlan} />}
       {showNewHealthNote && <NewHealthNoteModal onClose={() => setShowNewHealthNote(false)} onSave={addHealthNote} />}
       {showNewMedication && <NewMedicationModal onClose={() => setShowNewMedication(false)} onSave={addMedication} />}
       {showNewWeight && <NewWeightModal onClose={() => setShowNewWeight(false)} onSave={addWeight} />}
+      {showNewExpense && <NewPrivateExpenseModal onClose={() => setShowNewExpense(false)} onSave={addPrivateExpense} />}
 
       {viewerPhoto && (
         <PhotoViewerModal
@@ -671,6 +755,49 @@ function NewWeightModal({ onClose, onSave }) {
         disabled={!weightKg}
         onClick={() => onSave({ date, weightKg, note })}
         style={{ ...btnPrimary, width: "100%", padding: "11px 0", opacity: !weightKg ? 0.5 : 1 }}
+      >Speichern</button>
+    </Modal>
+  );
+}
+
+function NewPrivateExpenseModal({ onClose, onSave }) {
+  const [date, setDate] = useState(todayISO());
+  const [description, setDescription] = useState("");
+  const [amount, setAmount] = useState("");
+  const [note, setNote] = useState("");
+  const [photoFile, setPhotoFile] = useState(null);
+  const [photoPreview, setPhotoPreview] = useState(null);
+
+  const onPhotoChange = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setPhotoFile(file);
+    setPhotoPreview(URL.createObjectURL(file));
+  };
+
+  return (
+    <Modal title="Private Rechnung" onClose={onClose}>
+      <label style={labelStyle}>Beschreibung</label>
+      <input style={inputStyle} value={description} onChange={(e) => setDescription(e.target.value)} placeholder="z. B. Tierarztrechnung" />
+      <label style={labelStyle}>Datum</label>
+      <input type="date" style={inputStyle} value={date} onChange={(e) => setDate(e.target.value)} />
+      <label style={labelStyle}>Betrag (€)</label>
+      <input type="number" style={inputStyle} value={amount} onChange={(e) => setAmount(e.target.value)} />
+      <label style={labelStyle}>Notiz (optional)</label>
+      <input style={inputStyle} value={note} onChange={(e) => setNote(e.target.value)} />
+      <label style={labelStyle}>Beleg-Foto (optional)</label>
+      {photoPreview ? (
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
+          <img src={photoPreview} alt="" style={{ width: 56, height: 56, borderRadius: 8, objectFit: "cover" }} />
+          <button type="button" onClick={() => { setPhotoFile(null); setPhotoPreview(null); }} style={btnGhost}>Entfernen</button>
+        </div>
+      ) : (
+        <input type="file" accept="image/*" onChange={onPhotoChange} style={{ marginBottom: 12, fontSize: 12.5 }} />
+      )}
+      <button
+        disabled={!description.trim() || !amount}
+        onClick={() => onSave({ date, description: description.trim(), amount, note, photoFile })}
+        style={{ ...btnPrimary, width: "100%", padding: "11px 0", opacity: (!description.trim() || !amount) ? 0.5 : 1 }}
       >Speichern</button>
     </Modal>
   );

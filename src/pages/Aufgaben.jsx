@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { AlertTriangle, CheckCircle2, Plus, Repeat, Pencil } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Plus, Repeat, Pencil, ChevronDown, ChevronUp, Settings, Trash2 } from "lucide-react";
 import { supabase } from "../supabaseClient";
 import {
   Card, SectionTitle, Empty, Pill, Modal, IconBtn, COLOR,
@@ -11,19 +11,25 @@ export default function Aufgaben({ user }) {
   const [tasks, setTasks] = useState([]);
   const [horses, setHorses] = useState([]);
   const [people, setPeople] = useState([]);
+  const [categories, setCategories] = useState([]);
   const [showNew, setShowNew] = useState(false);
   const [showAbsence, setShowAbsence] = useState(false);
   const [editTask, setEditTask] = useState(null);
+  const [categoryFilter, setCategoryFilter] = useState("alle");
+  const [showDaily, setShowDaily] = useState(false);
+  const [showManageCategories, setShowManageCategories] = useState(false);
 
   const load = async () => {
-    const [tasksRes, horsesRes, peopleRes] = await Promise.all([
+    const [tasksRes, horsesRes, peopleRes, categoriesRes] = await Promise.all([
       supabase.from("tasks").select("*").order("date").order("time"),
       supabase.from("horses").select("*"),
       supabase.from("profiles").select("name"),
+      supabase.from("task_categories").select("*").order("created_at"),
     ]);
     setTasks(tasksRes.data ?? []);
     setHorses(horsesRes.data ?? []);
     setPeople((peopleRes.data ?? []).map((p) => p.name));
+    setCategories(categoriesRes.data ?? []);
     setLoading(false);
   };
 
@@ -32,8 +38,13 @@ export default function Aufgaben({ user }) {
   if (loading) return <Empty text="Lädt …" />;
 
   const t = todayISO();
-  const upcoming = tasks.filter((x) => (x.date_end || x.date) >= t);
-  const past = tasks.filter((x) => (x.date_end || x.date) < t).slice(-5);
+  const byCategory = (x) => categoryFilter === "alle" || (x.category || "allgemein") === categoryFilter;
+  const upcomingAll = tasks.filter((x) => (x.date_end || x.date) >= t && byCategory(x));
+  const past = tasks.filter((x) => (x.date_end || x.date) < t && byCategory(x)).slice(-5);
+  // Bei "Alle" werden tägliche Aufgaben separat eingeklappt, damit sie die Übersicht nicht zumüllen
+  const separateDaily = categoryFilter === "alle";
+  const upcoming = separateDaily ? upcomingAll.filter((x) => (x.category || "allgemein") !== "taeglich") : upcomingAll;
+  const dailyTasks = separateDaily ? upcomingAll.filter((x) => (x.category || "allgemein") === "taeglich") : [];
 
   const uebernehmen = async (task) => {
     const already = task.assigned_users || [];
@@ -60,12 +71,12 @@ export default function Aufgaben({ user }) {
       const seriesId = crypto.randomUUID();
       let d = data.date;
       while (d <= data.recurEnd) {
-        rows.push({ title: data.title, description: data.desc, type: data.type, date: d, date_end: null, time: data.time || null, horse_ids: data.horseIds, recurring: true, series_id: seriesId, assigned_users: data.assignTo, done: doneIfAssigned });
+        rows.push({ title: data.title, description: data.desc, type: data.type, date: d, date_end: null, time: data.time || null, horse_ids: data.horseIds, recurring: true, series_id: seriesId, assigned_users: data.assignTo, done: doneIfAssigned, category: data.category });
         d = addDays(d, 1);
       }
     } else {
       const dateEnd = data.mode === "range" && data.rangeEnd && data.rangeEnd > data.date ? data.rangeEnd : null;
-      rows.push({ title: data.title, description: data.desc, type: data.type, date: data.date, date_end: dateEnd, time: data.time || null, horse_ids: data.horseIds, recurring: false, assigned_users: data.assignTo, done: doneIfAssigned });
+      rows.push({ title: data.title, description: data.desc, type: data.type, date: data.date, date_end: dateEnd, time: data.time || null, horse_ids: data.horseIds, recurring: false, assigned_users: data.assignTo, done: doneIfAssigned, category: data.category });
     }
     await supabase.from("tasks").insert(rows);
     setShowNew(false);
@@ -101,13 +112,13 @@ export default function Aufgaben({ user }) {
   const updateTask = async (data) => {
     if (data.scope === "series" && editTask.series_id) {
       await supabase.from("tasks").update({
-        title: data.title, description: data.desc, type: data.type,
+        title: data.title, description: data.desc, type: data.type, category: data.category,
         time: data.time || null, horse_ids: data.horseIds, assigned_users: data.assignTo,
       }).eq("series_id", editTask.series_id);
     } else {
       const dateEnd = data.dateEnd && data.dateEnd > data.date ? data.dateEnd : null;
       await supabase.from("tasks").update({
-        title: data.title, description: data.desc, type: data.type, date: data.date, date_end: dateEnd,
+        title: data.title, description: data.desc, type: data.type, category: data.category, date: data.date, date_end: dateEnd,
         time: data.time || null, horse_ids: data.horseIds, assigned_users: data.assignTo,
       }).eq("id", editTask.id);
     }
@@ -125,6 +136,22 @@ export default function Aufgaben({ user }) {
     load();
   };
 
+  const addCategory = async (label) => {
+    let key = label.trim().toLowerCase()
+      .replace(/[äöüß]/g, (c) => ({ ä: "ae", ö: "oe", ü: "ue", ß: "ss" }[c]))
+      .replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
+    if (!key) return;
+    if (categories.some((c) => c.key === key)) key = `${key}_${Date.now().toString().slice(-4)}`;
+    await supabase.from("task_categories").insert({ key, label: label.trim() });
+    load();
+  };
+
+  const deleteCategory = async (key) => {
+    await supabase.from("task_categories").delete().eq("key", key);
+    if (categoryFilter === key) setCategoryFilter("alle");
+    load();
+  };
+
   return (
     <div>
       <SectionTitle right={
@@ -133,11 +160,41 @@ export default function Aufgaben({ user }) {
           <IconBtn onClick={() => setShowNew(true)}><Plus size={15} /> Aufgabe</IconBtn>
         </div>
       }>Anstehend</SectionTitle>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 12, alignItems: "center" }}>
+        <button onClick={() => setCategoryFilter("alle")} style={{
+          padding: "5px 11px", borderRadius: 999, border: `1px solid ${categoryFilter === "alle" ? COLOR.accent : COLOR.line}`,
+          background: categoryFilter === "alle" ? "#F3ECDD" : "#fff", fontSize: 12, cursor: "pointer", color: COLOR.ink,
+        }}>Alle</button>
+        {categories.map((c) => (
+          <button key={c.key} onClick={() => setCategoryFilter(c.key)} style={{
+            padding: "5px 11px", borderRadius: 999, border: `1px solid ${categoryFilter === c.key ? COLOR.accent : COLOR.line}`,
+            background: categoryFilter === c.key ? "#F3ECDD" : "#fff", fontSize: 12, cursor: "pointer", color: COLOR.ink,
+          }}>{c.label}</button>
+        ))}
+        <button onClick={() => setShowManageCategories(true)} style={{ background: "none", border: "none", cursor: "pointer", color: COLOR.inkSoft, padding: 4, display: "flex" }}>
+          <Settings size={15} />
+        </button>
+      </div>
       {upcoming.length === 0 && <Empty text="Keine Aufgaben geplant." />}
       {upcoming.map((x) => (
         <TaskCard key={x.id} task={x} horses={horses} user={user}
           onUebernehmen={() => uebernehmen(x)} onErledigt={() => erledigt(x)} onZurueck={() => zuruecknehmen(x)} onEdit={() => setEditTask(x)} />
       ))}
+      {dailyTasks.length > 0 && (
+        <>
+          <button onClick={() => setShowDaily((v) => !v)} style={{
+            display: "flex", alignItems: "center", gap: 6, background: "none", border: "none", cursor: "pointer",
+            color: COLOR.inkSoft, fontSize: 13, fontWeight: 600, padding: "8px 0",
+          }}>
+            {showDaily ? <ChevronUp size={15} /> : <ChevronDown size={15} />}
+            Tägliche Aufgaben ({dailyTasks.length})
+          </button>
+          {showDaily && dailyTasks.map((x) => (
+            <TaskCard key={x.id} task={x} horses={horses} user={user}
+              onUebernehmen={() => uebernehmen(x)} onErledigt={() => erledigt(x)} onZurueck={() => zuruecknehmen(x)} onEdit={() => setEditTask(x)} />
+          ))}
+        </>
+      )}
       {past.length > 0 && (
         <>
           <SectionTitle>Vergangen</SectionTitle>
@@ -147,15 +204,57 @@ export default function Aufgaben({ user }) {
           ))}
         </>
       )}
-      {showNew && <NewTaskModal horses={horses} people={people} onClose={() => setShowNew(false)} onSave={addTask} />}
+      {showNew && <NewTaskModal horses={horses} people={people} categories={categories} onClose={() => setShowNew(false)} onSave={addTask} />}
       {showAbsence && <NewAbsenceModal horses={horses} people={people.filter((p) => p !== user)} onClose={() => setShowAbsence(false)} onSave={addAbsence} />}
       {editTask && (
         <NewTaskModal
-          horses={horses} people={people} editing={editTask}
+          horses={horses} people={people} categories={categories} editing={editTask}
           onClose={() => setEditTask(null)} onSave={updateTask} onDelete={deleteTask}
         />
       )}
+      {showManageCategories && (
+        <ManageCategoriesModal categories={categories} onAdd={addCategory} onDelete={deleteCategory} onClose={() => setShowManageCategories(false)} />
+      )}
     </div>
+  );
+}
+
+function ManageCategoriesModal({ categories, onAdd, onDelete, onClose }) {
+  const [newLabel, setNewLabel] = useState("");
+  const [confirmDeleteKey, setConfirmDeleteKey] = useState(null);
+  const add = () => {
+    if (!newLabel.trim()) return;
+    onAdd(newLabel);
+    setNewLabel("");
+  };
+  return (
+    <Modal title="Kategorien verwalten" onClose={onClose}>
+      {categories.map((c) => (
+        <div key={c.key} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 0", borderBottom: `1px solid ${COLOR.line}` }}>
+          <span style={{ fontSize: 13.5, color: COLOR.ink }}>{c.label}</span>
+          {confirmDeleteKey === c.key ? (
+            <div style={{ display: "flex", gap: 6 }}>
+              <button onClick={() => { onDelete(c.key); setConfirmDeleteKey(null); }} style={{ ...btnGhost, color: COLOR.dringend, padding: "4px 10px" }}>Löschen</button>
+              <button onClick={() => setConfirmDeleteKey(null)} style={{ ...btnGhost, padding: "4px 10px" }}>Abbrechen</button>
+            </div>
+          ) : (
+            <button onClick={() => setConfirmDeleteKey(c.key)} style={{ background: "none", border: "none", cursor: "pointer", color: COLOR.inkSoft }}>
+              <Trash2 size={14} />
+            </button>
+          )}
+        </div>
+      ))}
+      <div style={{ display: "flex", gap: 6, marginTop: 14 }}>
+        <input
+          style={{ ...inputStyle, marginBottom: 0, flex: 1 }}
+          value={newLabel}
+          onChange={(e) => setNewLabel(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter") add(); }}
+          placeholder="Neue Kategorie (z. B. Turnier)"
+        />
+        <button onClick={add} style={btnPrimary}>+ Hinzufügen</button>
+      </div>
+    </Modal>
   );
 }
 
@@ -252,7 +351,7 @@ function NewAbsenceModal({ horses, people, onClose, onSave }) {
   );
 }
 
-function NewTaskModal({ horses, people, editing, onClose, onSave, onDelete }) {
+function NewTaskModal({ horses, people, categories, editing, onClose, onSave, onDelete }) {
   const [title, setTitle] = useState(editing?.title || "");
   const [desc, setDesc] = useState(editing?.description || "");
   const [type, setType] = useState(editing?.type || "uebernahme");
@@ -267,6 +366,7 @@ function NewTaskModal({ horses, people, editing, onClose, onSave, onDelete }) {
   const [customName, setCustomName] = useState("");
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [scope, setScope] = useState("instance"); // instance | series (nur relevant bei wiederkehrenden Aufgaben)
+  const [category, setCategory] = useState(editing?.category || "allgemein");
 
   const togglePerson = (p) => setAssignTo((a) => (a.includes(p) ? a.filter((x) => x !== p) : [...a, p]));
   const addCustomName = () => {
@@ -287,6 +387,10 @@ function NewTaskModal({ horses, people, editing, onClose, onSave, onDelete }) {
       <label style={labelStyle}>Typ</label>
       <select style={inputStyle} value={type} onChange={(e) => setType(e.target.value)}>
         {Object.entries(TASK_TYPES).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+      </select>
+      <label style={labelStyle}>Kategorie</label>
+      <select style={inputStyle} value={category} onChange={(e) => setCategory(e.target.value)}>
+        {categories.map((c) => <option key={c.key} value={c.key}>{c.label}</option>)}
       </select>
       {editing?.series_id && (
         <>
@@ -385,7 +489,7 @@ function NewTaskModal({ horses, people, editing, onClose, onSave, onDelete }) {
       )}
       <button
         disabled={!title.trim()}
-        onClick={() => onSave({ title: title.trim(), desc, type, date, dateEnd, time, horseIds, mode, rangeEnd, recurEnd, assignTo, scope })}
+        onClick={() => onSave({ title: title.trim(), desc, type, date, dateEnd, time, horseIds, mode, rangeEnd, recurEnd, assignTo, scope, category })}
         style={{ ...btnPrimary, width: "100%", padding: "11px 0", marginTop: 6, opacity: title.trim() ? 1 : 0.5 }}
       >{editing ? "Speichern" : "Aufgabe speichern"}</button>
       {editing && (

@@ -132,6 +132,20 @@ create table if not exists news (
   created_at timestamptz default now()
 );
 
+-- Private Rechnungen pro Pferd (z.B. eigene Tierarzt-/Hufschmiedrechnung, nur für die eintragende Person sichtbar)
+create table if not exists horse_expenses (
+  id uuid primary key default gen_random_uuid(),
+  horse_id uuid not null references horses(id) on delete cascade,
+  user_id uuid not null references auth.users(id) on delete cascade,
+  user_name text not null,
+  date date not null,
+  description text not null,
+  amount numeric not null,
+  note text,
+  photo_url text,
+  created_at timestamptz default now()
+);
+
 -- Medikamente (mit Zeitraum, optional dauerhaft = kein date_to)
 create table if not exists medications (
   id uuid primary key default gen_random_uuid(),
@@ -157,6 +171,24 @@ alter table events add column if not exists date_end date;
 
 -- Serien-Kennung für wiederkehrende Aufgaben (damit man die ganze Serie oder nur einen Termin bearbeiten kann)
 alter table tasks add column if not exists series_id uuid;
+
+-- Kategorie für Aufgaben (Allgemein / Täglich / Umzug Sommerstall / Umzug Winterstall / Urlaub)
+alter table tasks add column if not exists category text default 'allgemein';
+
+-- Verwaltbare Kategorien-Liste (über die App bearbeitbar, kein Code-Update mehr nötig)
+create table if not exists task_categories (
+  id uuid primary key default gen_random_uuid(),
+  key text not null unique,
+  label text not null,
+  created_at timestamptz default now()
+);
+insert into task_categories (key, label) values
+  ('allgemein', 'Allgemein'),
+  ('taeglich', 'Täglich'),
+  ('umzug_sommer', 'Umzug Sommerstall'),
+  ('umzug_winter', 'Umzug Winterstall'),
+  ('urlaub', 'Urlaub')
+on conflict (key) do nothing;
 
 -- Mehrere Personen pro Aufgabe zuweisen können (manche Aufgaben schafft man nicht allein)
 alter table tasks add column if not exists assigned_users text[] default '{}';
@@ -210,6 +242,8 @@ alter table health_notes enable row level security;
 alter table medications enable row level security;
 alter table weights enable row level security;
 alter table news enable row level security;
+alter table horse_expenses enable row level security;
+alter table task_categories enable row level security;
 
 -- Profile: jede:r sieht alle Namen (für Zuordnung), bearbeitet nur sich selbst
 drop policy if exists "profiles_select_all" on profiles;
@@ -230,6 +264,7 @@ drop policy if exists "health_notes_all" on health_notes;
 drop policy if exists "medications_all" on medications;
 drop policy if exists "weights_all" on weights;
 drop policy if exists "news_all" on news;
+drop policy if exists "task_categories_all" on task_categories;
 create policy "horses_all" on horses for all using (auth.role() = 'authenticated') with check (auth.role() = 'authenticated');
 create policy "tasks_all" on tasks for all using (auth.role() = 'authenticated') with check (auth.role() = 'authenticated');
 create policy "events_all" on events for all using (auth.role() = 'authenticated') with check (auth.role() = 'authenticated');
@@ -240,13 +275,17 @@ create policy "health_notes_all" on health_notes for all using (auth.role() = 'a
 create policy "medications_all" on medications for all using (auth.role() = 'authenticated') with check (auth.role() = 'authenticated');
 create policy "weights_all" on weights for all using (auth.role() = 'authenticated') with check (auth.role() = 'authenticated');
 create policy "news_all" on news for all using (auth.role() = 'authenticated') with check (auth.role() = 'authenticated');
+create policy "task_categories_all" on task_categories for all using (auth.role() = 'authenticated') with check (auth.role() = 'authenticated');
 
--- Private Termine & Trainingsplanung: nur der/die Ersteller:in sieht & bearbeitet eigene Einträge
+-- Private Termine, Trainingsplanung & Rechnungen: nur der/die Ersteller:in sieht & bearbeitet eigene Einträge
 drop policy if exists "personal_events_own" on personal_events;
 drop policy if exists "training_plans_own" on training_plans;
+drop policy if exists "horse_expenses_own" on horse_expenses;
 create policy "personal_events_own" on personal_events for all
   using (auth.uid() = user_id) with check (auth.uid() = user_id);
 create policy "training_plans_own" on training_plans for all
+  using (auth.uid() = user_id) with check (auth.uid() = user_id);
+create policy "horse_expenses_own" on horse_expenses for all
   using (auth.uid() = user_id) with check (auth.uid() = user_id);
 
 -- Eure echten Pferde (Gesundheitsdaten trägst du später direkt in der App ein)
