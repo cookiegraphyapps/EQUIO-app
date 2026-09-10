@@ -194,6 +194,31 @@ insert into task_categories (key, label) values
   ('urlaub', 'Urlaub')
 on conflict (key) do nothing;
 
+-- Anweideplan Frühjahr: frei einstellbare Stufen (Dauer pro Tag + wie viele Tage die Stufe gilt)
+-- plus ein gemeinsamer Startzeitpunkt für alle Pferde.
+create table if not exists turnout_plan_stages (
+  id uuid primary key default gen_random_uuid(),
+  order_index int not null,
+  label text not null,
+  days int not null default 7,
+  created_at timestamptz default now()
+);
+insert into turnout_plan_stages (order_index, label, days)
+select * from (values
+  (1, '5 Minuten', 7), (2, '10 Minuten', 7), (3, '30 Minuten', 7), (4, '1 Stunde', 7),
+  (5, '2 Stunden', 7), (6, '3 Stunden', 7), (7, '4 Stunden', 7), (8, '5 Stunden', 7),
+  (9, '6 Stunden', 7), (10, '7 Stunden', 7), (11, '8 Stunden', 7), (12, 'Ganztägig', 365)
+) as seed(order_index, label, days)
+where not exists (select 1 from turnout_plan_stages);
+
+create table if not exists turnout_plan_settings (
+  id int primary key default 1,
+  start_date date,
+  constraint turnout_plan_settings_singleton check (id = 1)
+);
+insert into turnout_plan_settings (id, start_date) values (1, null) on conflict (id) do nothing;
+on conflict (key) do nothing;
+
 -- Mehrere Personen pro Aufgabe zuweisen können (manche Aufgaben schafft man nicht allein)
 alter table tasks add column if not exists assigned_users text[] default '{}';
 update tasks set assigned_users = array[assigned_user]
@@ -249,6 +274,8 @@ alter table weights enable row level security;
 alter table news enable row level security;
 alter table horse_expenses enable row level security;
 alter table task_categories enable row level security;
+alter table turnout_plan_stages enable row level security;
+alter table turnout_plan_settings enable row level security;
 
 -- Profile: jede:r sieht alle Namen (für Zuordnung), bearbeitet nur sich selbst.
 -- Entfernen (löschen) eines Profils nur durch Admin.
@@ -313,6 +340,24 @@ create policy "task_categories_select" on task_categories for select using (auth
 create policy "task_categories_insert_admin" on task_categories for insert
   with check (exists (select 1 from profiles p2 where p2.id = auth.uid() and p2.is_admin = true));
 create policy "task_categories_delete_admin" on task_categories for delete
+  using (exists (select 1 from profiles p2 where p2.id = auth.uid() and p2.is_admin = true));
+
+-- Anweideplan: alle dürfen lesen, nur Admin darf Stufen/Start bearbeiten
+drop policy if exists "turnout_plan_stages_select" on turnout_plan_stages;
+drop policy if exists "turnout_plan_stages_insert_admin" on turnout_plan_stages;
+drop policy if exists "turnout_plan_stages_update_admin" on turnout_plan_stages;
+drop policy if exists "turnout_plan_stages_delete_admin" on turnout_plan_stages;
+drop policy if exists "turnout_plan_settings_select" on turnout_plan_settings;
+drop policy if exists "turnout_plan_settings_update_admin" on turnout_plan_settings;
+create policy "turnout_plan_stages_select" on turnout_plan_stages for select using (auth.role() = 'authenticated');
+create policy "turnout_plan_stages_insert_admin" on turnout_plan_stages for insert
+  with check (exists (select 1 from profiles p2 where p2.id = auth.uid() and p2.is_admin = true));
+create policy "turnout_plan_stages_update_admin" on turnout_plan_stages for update
+  using (exists (select 1 from profiles p2 where p2.id = auth.uid() and p2.is_admin = true));
+create policy "turnout_plan_stages_delete_admin" on turnout_plan_stages for delete
+  using (exists (select 1 from profiles p2 where p2.id = auth.uid() and p2.is_admin = true));
+create policy "turnout_plan_settings_select" on turnout_plan_settings for select using (auth.role() = 'authenticated');
+create policy "turnout_plan_settings_update_admin" on turnout_plan_settings for update
   using (exists (select 1 from profiles p2 where p2.id = auth.uid() and p2.is_admin = true));
 
 -- Private Termine, Trainingsplanung & Rechnungen: nur der/die Ersteller:in sieht & bearbeitet eigene Einträge

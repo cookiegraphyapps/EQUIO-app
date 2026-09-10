@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { AlertTriangle, CheckCircle2, Trash2, Camera } from "lucide-react";
 import { supabase, uploadPhoto } from "../supabaseClient";
-import { Card, SectionTitle, Empty, Pill, COLOR, todayISO, addDays, fmtDate, daysUntil, nextDue, dateToISO, HEALTH_LABELS, inputStyle, btnPrimary } from "../components/ui";
+import { Card, SectionTitle, Empty, Pill, COLOR, todayISO, addDays, fmtDate, daysUntil, nextDue, dateToISO, turnoutActiveStage, HEALTH_LABELS, inputStyle, btnPrimary } from "../components/ui";
 
 function relativeDay(timestamp) {
   const diff = daysUntil(dateToISO(new Date(timestamp))) * -1; // Tage in der Vergangenheit, positiv
@@ -77,11 +77,13 @@ export default function Dashboard({ user }) {
   useEffect(() => {
     (async () => {
       const t = todayISO();
-      const [tasksRes, eventsRes, horsesRes, expensesRes] = await Promise.all([
+      const [tasksRes, eventsRes, horsesRes, expensesRes, turnoutStagesRes, turnoutSettingsRes] = await Promise.all([
         supabase.from("tasks").select("*").lte("date", addDays(t, 7)).order("date"),
         supabase.from("events").select("*").eq("date", t),
         supabase.from("horses").select("*"),
         supabase.from("expenses").select("*, expense_splits(*)"),
+        supabase.from("turnout_plan_stages").select("*").order("order_index"),
+        supabase.from("turnout_plan_settings").select("*").eq("id", 1).maybeSingle(),
       ]);
       const existingTasks = tasksRes.data ?? [];
       const horsesData = horsesRes.data ?? [];
@@ -106,6 +108,20 @@ export default function Dashboard({ user }) {
           }
         });
       });
+
+      // Anweideplan: heutige Stufe automatisch als tägliche Aufgabe anlegen, falls noch nicht vorhanden.
+      const activeTurnout = turnoutActiveStage(turnoutStagesRes.data ?? [], turnoutSettingsRes.data?.start_date ?? null);
+      if (activeTurnout) {
+        const title = `Anweiden heute: ${activeTurnout.stage.label}`;
+        const alreadyExists = existingTasks.some((task) => task.title === title && task.date === t);
+        if (!alreadyExists) {
+          newReminders.push({
+            title, description: `Stufe ${activeTurnout.dayInStage}/${activeTurnout.stage.days} Tage`, type: "uebernahme_erledigt",
+            date: t, horse_ids: [], assigned_users: [], done: false, recurring: false, category: "taeglich",
+          });
+        }
+      }
+
       if (newReminders.length > 0) {
         const { data: inserted } = await supabase.from("tasks").insert(newReminders).select();
         if (inserted) existingTasks.push(...inserted);

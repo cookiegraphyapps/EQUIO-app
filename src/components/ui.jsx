@@ -61,6 +61,20 @@ export function daysUntil(iso) {
   const a = parseISO(todayISO()); const b = parseISO(iso);
   return Math.round((b - a) / 86400000);
 }
+
+// Ermittelt aus dem Anweideplan (Stufen + gemeinsamer Start) die heute aktive Stufe.
+// Gibt null zurück, wenn der Plan noch nicht gestartet oder schon komplett durchlaufen ist.
+export function turnoutActiveStage(stages, startDate) {
+  if (!startDate) return null;
+  const elapsed = -daysUntil(startDate); // 0 am Starttag, wächst danach
+  if (elapsed < 0) return null;
+  let cursor = 0;
+  for (const stage of stages) {
+    if (elapsed < cursor + stage.days) return { stage, dayInStage: elapsed - cursor + 1 };
+    cursor += stage.days;
+  }
+  return null;
+}
 // Nächster Fälligkeitstermin: direkt gesetztes Datum (item.next) hat Vorrang,
 // sonst berechnet aus letztem Termin + Intervall (item.unit: "weeks" oder "months").
 export function nextDue(item) {
