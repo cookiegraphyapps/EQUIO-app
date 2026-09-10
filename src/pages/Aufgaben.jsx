@@ -36,8 +36,11 @@ export default function Aufgaben({ user }) {
   const past = tasks.filter((x) => (x.date_end || x.date) < t).slice(-5);
 
   const uebernehmen = async (task) => {
-    const done = task.type === "uebernahme";
-    await supabase.from("tasks").update({ assigned_user: user, done }).eq("id", task.id);
+    const already = task.assigned_users || [];
+    if (already.includes(user)) return;
+    const assigned_users = [...already, user];
+    const done = task.type === "uebernahme"; // reine Übernahme gilt sofort als erledigt, sobald jemand sie hat
+    await supabase.from("tasks").update({ assigned_users, done }).eq("id", task.id);
     load();
   };
   const erledigt = async (task) => {
@@ -45,23 +48,24 @@ export default function Aufgaben({ user }) {
     load();
   };
   const zuruecknehmen = async (task) => {
-    await supabase.from("tasks").update({ assigned_user: null, done: false }).eq("id", task.id);
+    const assigned_users = (task.assigned_users || []).filter((u) => u !== user);
+    await supabase.from("tasks").update({ assigned_users, done: assigned_users.length === 0 ? false : task.done }).eq("id", task.id);
     load();
   };
 
   const addTask = async (data) => {
-    const doneIfAssigned = !!data.assignTo && data.type === "uebernahme";
+    const doneIfAssigned = data.assignTo.length > 0 && data.type === "uebernahme";
     const rows = [];
     if (data.mode === "recurring" && data.recurEnd) {
       const seriesId = crypto.randomUUID();
       let d = data.date;
       while (d <= data.recurEnd) {
-        rows.push({ title: data.title, description: data.desc, type: data.type, date: d, date_end: null, time: data.time || null, horse_ids: data.horseIds, recurring: true, series_id: seriesId, assigned_user: data.assignTo || null, done: doneIfAssigned });
+        rows.push({ title: data.title, description: data.desc, type: data.type, date: d, date_end: null, time: data.time || null, horse_ids: data.horseIds, recurring: true, series_id: seriesId, assigned_users: data.assignTo, done: doneIfAssigned });
         d = addDays(d, 1);
       }
     } else {
       const dateEnd = data.mode === "range" && data.rangeEnd && data.rangeEnd > data.date ? data.rangeEnd : null;
-      rows.push({ title: data.title, description: data.desc, type: data.type, date: data.date, date_end: dateEnd, time: data.time || null, horse_ids: data.horseIds, recurring: false, assigned_user: data.assignTo || null, done: doneIfAssigned });
+      rows.push({ title: data.title, description: data.desc, type: data.type, date: data.date, date_end: dateEnd, time: data.time || null, horse_ids: data.horseIds, recurring: false, assigned_users: data.assignTo, done: doneIfAssigned });
     }
     await supabase.from("tasks").insert(rows);
     setShowNew(false);
@@ -82,7 +86,7 @@ export default function Aufgaben({ user }) {
           date: d,
           time: data.time || null,
           horse_ids: [hid],
-          assigned_user: null,
+          assigned_users: [],
           done: false,
           recurring: false,
         });
@@ -98,13 +102,13 @@ export default function Aufgaben({ user }) {
     if (data.scope === "series" && editTask.series_id) {
       await supabase.from("tasks").update({
         title: data.title, description: data.desc, type: data.type,
-        time: data.time || null, horse_ids: data.horseIds, assigned_user: data.assignTo || null,
+        time: data.time || null, horse_ids: data.horseIds, assigned_users: data.assignTo,
       }).eq("series_id", editTask.series_id);
     } else {
       const dateEnd = data.dateEnd && data.dateEnd > data.date ? data.dateEnd : null;
       await supabase.from("tasks").update({
         title: data.title, description: data.desc, type: data.type, date: data.date, date_end: dateEnd,
-        time: data.time || null, horse_ids: data.horseIds, assigned_user: data.assignTo || null,
+        time: data.time || null, horse_ids: data.horseIds, assigned_users: data.assignTo,
       }).eq("id", editTask.id);
     }
     setEditTask(null);
@@ -157,12 +161,14 @@ export default function Aufgaben({ user }) {
 
 function TaskCard({ task, horses, user, onUebernehmen, onErledigt, onZurueck, onEdit, faded }) {
   const names = (task.horse_ids || []).map((id) => horses.find((h) => h.id === id)?.name).filter(Boolean).join(", ");
-  const isOpen = !task.assigned_user && task.type !== "info";
+  const assignedUsers = task.assigned_users || [];
+  const isOpen = assignedUsers.length === 0 && task.type !== "info";
+  const iAmIn = assignedUsers.includes(user);
   let statusPill;
   if (task.type === "info") statusPill = <Pill bg={COLOR.gemeinsamBg} fg={COLOR.gemeinsam}>Info</Pill>;
   else if (isOpen) statusPill = <Pill bg={COLOR.dringendBg} fg={COLOR.dringend}><AlertTriangle size={11} />offen</Pill>;
   else if (task.type === "uebernahme_erledigt" && task.done) statusPill = <Pill bg={COLOR.erledigtBg} fg={COLOR.erledigt}><CheckCircle2 size={11} />erledigt</Pill>;
-  else statusPill = <Pill bg={COLOR.uebernommenBg} fg={COLOR.uebernommen}>{task.assigned_user} übernimmt</Pill>;
+  else statusPill = <Pill bg={COLOR.uebernommenBg} fg={COLOR.uebernommen}>{assignedUsers.join(", ")} {assignedUsers.length > 1 ? "übernehmen" : "übernimmt"}</Pill>;
 
   return (
     <Card style={{ marginBottom: 8, opacity: faded ? 0.6 : 1 }}>
@@ -184,13 +190,13 @@ function TaskCard({ task, horses, user, onUebernehmen, onErledigt, onZurueck, on
         </div>
       </div>
       {task.type !== "info" && (
-        <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
-          {isOpen && <button onClick={onUebernehmen} style={btnPrimary}>Ich übernehme</button>}
-          {!isOpen && task.type === "uebernahme_erledigt" && !task.done && task.assigned_user === user && (
+        <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
+          {!iAmIn && <button onClick={onUebernehmen} style={btnPrimary}>{isOpen ? "Ich übernehme" : "Ich helfe mit"}</button>}
+          {task.type === "uebernahme_erledigt" && !task.done && assignedUsers.length > 0 && (
             <button onClick={onErledigt} style={btnPrimary}>Erledigt</button>
           )}
-          {!isOpen && task.assigned_user === user && (
-            <button onClick={onZurueck} style={btnGhost}>Zurücknehmen</button>
+          {iAmIn && (
+            <button onClick={onZurueck} style={btnGhost}>Verlassen</button>
           )}
         </div>
       )}
@@ -257,9 +263,17 @@ function NewTaskModal({ horses, people, editing, onClose, onSave, onDelete }) {
   const [mode, setMode] = useState("single"); // single | range | recurring
   const [rangeEnd, setRangeEnd] = useState(addDays(todayISO(), 2));
   const [recurEnd, setRecurEnd] = useState(addDays(todayISO(), 6));
-  const [assignTo, setAssignTo] = useState(editing?.assigned_user || "");
+  const [assignTo, setAssignTo] = useState(editing?.assigned_users || []);
+  const [customName, setCustomName] = useState("");
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [scope, setScope] = useState("instance"); // instance | series (nur relevant bei wiederkehrenden Aufgaben)
+
+  const togglePerson = (p) => setAssignTo((a) => (a.includes(p) ? a.filter((x) => x !== p) : [...a, p]));
+  const addCustomName = () => {
+    const n = customName.trim();
+    if (n && !assignTo.includes(n)) setAssignTo((a) => [...a, n]);
+    setCustomName("");
+  };
 
   const toggleHorse = (id) => setHorseIds((h) => (h.includes(id) ? h.filter((x) => x !== id) : [...h, id]));
   const modeBtn = { flex: 1, padding: "7px 4px", borderRadius: 9, border: `1px solid ${COLOR.line}`, background: "#fff", fontSize: 12, fontWeight: 600, cursor: "pointer", color: COLOR.ink };
@@ -342,21 +356,31 @@ function NewTaskModal({ horses, people, editing, onClose, onSave, onDelete }) {
       </div>
       {type !== "info" && (
         <>
-          <label style={labelStyle}>Direkt zuweisen (optional)</label>
+          <label style={labelStyle}>Direkt zuweisen (optional, mehrere möglich)</label>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 8 }}>
             {people.map((p) => (
-              <button key={p} type="button" onClick={() => setAssignTo(assignTo === p ? "" : p)} style={{
-                padding: "6px 11px", borderRadius: 999, border: `1px solid ${assignTo === p ? COLOR.accent : COLOR.line}`,
-                background: assignTo === p ? "#F3ECDD" : "#fff", fontSize: 12.5, cursor: "pointer", color: COLOR.ink,
+              <button key={p} type="button" onClick={() => togglePerson(p)} style={{
+                padding: "6px 11px", borderRadius: 999, border: `1px solid ${assignTo.includes(p) ? COLOR.accent : COLOR.line}`,
+                background: assignTo.includes(p) ? "#F3ECDD" : "#fff", fontSize: 12.5, cursor: "pointer", color: COLOR.ink,
               }}>{p}</button>
             ))}
+            {assignTo.filter((n) => !people.includes(n)).map((n) => (
+              <button key={n} type="button" onClick={() => togglePerson(n)} style={{
+                padding: "6px 11px", borderRadius: 999, border: `1px solid ${COLOR.accent}`,
+                background: "#F3ECDD", fontSize: 12.5, cursor: "pointer", color: COLOR.ink,
+              }}>{n} ✕</button>
+            ))}
           </div>
-          <input
-            style={inputStyle}
-            value={assignTo}
-            onChange={(e) => setAssignTo(e.target.value)}
-            placeholder="Offen lassen oder eigenen Namen eintragen (z. B. Mama)"
-          />
+          <div style={{ display: "flex", gap: 6, marginBottom: 12 }}>
+            <input
+              style={{ ...inputStyle, marginBottom: 0, flex: 1 }}
+              value={customName}
+              onChange={(e) => setCustomName(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addCustomName(); } }}
+              placeholder="Eigenen Namen hinzufügen (z. B. Mama)"
+            />
+            <button type="button" onClick={addCustomName} style={btnGhost}>+</button>
+          </div>
         </>
       )}
       <button

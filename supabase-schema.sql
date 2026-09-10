@@ -113,6 +113,17 @@ create table if not exists health_notes (
   created_at timestamptz default now()
 );
 
+-- Gewichtsverlauf (z.B. jährliches Wiegen)
+create table if not exists weights (
+  id uuid primary key default gen_random_uuid(),
+  horse_id uuid not null references horses(id) on delete cascade,
+  user_name text not null,
+  date date not null,
+  weight_kg numeric not null,
+  note text,
+  created_at timestamptz default now()
+);
+
 -- Medikamente (mit Zeitraum, optional dauerhaft = kein date_to)
 create table if not exists medications (
   id uuid primary key default gen_random_uuid(),
@@ -138,6 +149,11 @@ alter table events add column if not exists date_end date;
 
 -- Serien-Kennung für wiederkehrende Aufgaben (damit man die ganze Serie oder nur einen Termin bearbeiten kann)
 alter table tasks add column if not exists series_id uuid;
+
+-- Mehrere Personen pro Aufgabe zuweisen können (manche Aufgaben schafft man nicht allein)
+alter table tasks add column if not exists assigned_users text[] default '{}';
+update tasks set assigned_users = array[assigned_user]
+  where assigned_user is not null and (assigned_users is null or assigned_users = '{}');
 
 -- Fotos: Profilbild pro Pferd + Foto bei Gesundheitsnotiz
 alter table horses add column if not exists photo_url text;
@@ -181,6 +197,7 @@ alter table trainings enable row level security;
 alter table training_plans enable row level security;
 alter table health_notes enable row level security;
 alter table medications enable row level security;
+alter table weights enable row level security;
 
 -- Profile: jede:r sieht alle Namen (für Zuordnung), bearbeitet nur sich selbst
 drop policy if exists "profiles_select_all" on profiles;
@@ -199,6 +216,7 @@ drop policy if exists "expense_splits_all" on expense_splits;
 drop policy if exists "trainings_all" on trainings;
 drop policy if exists "health_notes_all" on health_notes;
 drop policy if exists "medications_all" on medications;
+drop policy if exists "weights_all" on weights;
 create policy "horses_all" on horses for all using (auth.role() = 'authenticated') with check (auth.role() = 'authenticated');
 create policy "tasks_all" on tasks for all using (auth.role() = 'authenticated') with check (auth.role() = 'authenticated');
 create policy "events_all" on events for all using (auth.role() = 'authenticated') with check (auth.role() = 'authenticated');
@@ -207,6 +225,7 @@ create policy "expense_splits_all" on expense_splits for all using (auth.role() 
 create policy "trainings_all" on trainings for all using (auth.role() = 'authenticated') with check (auth.role() = 'authenticated');
 create policy "health_notes_all" on health_notes for all using (auth.role() = 'authenticated') with check (auth.role() = 'authenticated');
 create policy "medications_all" on medications for all using (auth.role() = 'authenticated') with check (auth.role() = 'authenticated');
+create policy "weights_all" on weights for all using (auth.role() = 'authenticated') with check (auth.role() = 'authenticated');
 
 -- Private Termine & Trainingsplanung: nur der/die Ersteller:in sieht & bearbeitet eigene Einträge
 drop policy if exists "personal_events_own" on personal_events;

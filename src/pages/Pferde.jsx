@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
-import { ChevronLeft, Syringe, Scissors, Stethoscope, Pill as PillIcon, Dumbbell, Plus, HeartPulse, Wheat, Pencil, Camera, X } from "lucide-react";
+import { ChevronLeft, Syringe, Scissors, Stethoscope, Pill as PillIcon, Dumbbell, Plus, HeartPulse, Wheat, Pencil, Camera, X, Scale } from "lucide-react";
 import { supabase, uploadPhoto } from "../supabaseClient";
-import { Card, SectionTitle, Empty, Pill, Modal, IconBtn, COLOR, fmtDate, daysUntil, nextDue, addMonths, HEALTH_LABELS, HEALTH_DEFAULT_INTERVAL, inputStyle, labelStyle, btnPrimary, btnGhost, navBtn, todayISO } from "../components/ui";
+import { Card, SectionTitle, Empty, Pill, Modal, IconBtn, COLOR, fmtDate, daysUntil, nextDue, addMonths, addDays, HEALTH_LABELS, HEALTH_DEFAULT_INTERVAL, HEALTH_INTERVAL_UNIT, inputStyle, labelStyle, btnPrimary, btnGhost, navBtn, todayISO } from "../components/ui";
 
 const ICONS = { impfung: Syringe, hufschmied: Scissors, zahnarzt: Stethoscope, entwurmung: PillIcon };
 const INTENSITAETEN = ["locker", "normal", "intensiv"];
@@ -129,6 +129,9 @@ function PferdDetail({ horse, user, onBack, onSave, onDelete }) {
   const [medications, setMedications] = useState([]);
   const [showNewMedication, setShowNewMedication] = useState(false);
   const [confirmDeleteMedId, setConfirmDeleteMedId] = useState(null);
+  const [weights, setWeights] = useState([]);
+  const [showNewWeight, setShowNewWeight] = useState(false);
+  const [showWeightHistory, setShowWeightHistory] = useState(false);
   const [feedPlan, setFeedPlan] = useState(horse.feed_plan || "");
   const [editingFeedPlan, setEditingFeedPlan] = useState(false);
   const [savingFeedPlan, setSavingFeedPlan] = useState(false);
@@ -178,6 +181,16 @@ function PferdDetail({ horse, user, onBack, onSave, onDelete }) {
     setConfirmDeleteMedId(null);
     loadMedications();
   };
+
+  const loadWeights = async () => {
+    const { data } = await supabase.from("weights").select("*").eq("horse_id", horse.id).order("date", { ascending: false });
+    setWeights(data ?? []);
+  };
+  const addWeight = async (w) => {
+    await supabase.from("weights").insert({ horse_id: horse.id, user_name: user, date: w.date, weight_kg: Number(w.weightKg), note: w.note || null });
+    setShowNewWeight(false);
+    loadWeights();
+  };
   const [feedPlanError, setFeedPlanError] = useState("");
   const saveFeedPlan = async () => {
     setSavingFeedPlan(true);
@@ -203,6 +216,7 @@ function PferdDetail({ horse, user, onBack, onSave, onDelete }) {
     loadTrainings();
     loadHealthNotes();
     loadMedications();
+    loadWeights();
     supabase.auth.getUser().then(({ data }) => {
       const currentUid = data?.user?.id;
       setUid(currentUid);
@@ -223,7 +237,7 @@ function PferdDetail({ horse, user, onBack, onSave, onDelete }) {
   };
 
   const saveHealthItem = (key, { last, interval, next }) => {
-    const item = { last: last || null, interval: interval ? Number(interval) : HEALTH_DEFAULT_INTERVAL[key], next: next || null };
+    const item = { last: last || null, interval: interval ? Number(interval) : HEALTH_DEFAULT_INTERVAL[key], next: next || null, unit: HEALTH_INTERVAL_UNIT[key] };
     onSave({ health: { ...horse.health, [key]: item } });
     setEditKey(null);
   };
@@ -301,7 +315,7 @@ function PferdDetail({ horse, user, onBack, onSave, onDelete }) {
                   <div style={{ fontSize: 14, fontWeight: 600, color: COLOR.ink }}>{HEALTH_LABELS[k].label}</div>
                   <div style={{ fontSize: 11.5, color: COLOR.inkSoft }}>
                     {v?.last && `zuletzt ${fmtDate(v.last)} · `}
-                    {v ? `alle ${v.interval ?? HEALTH_DEFAULT_INTERVAL[k]} Mon.` : "Noch keine Angabe"}
+                    {v ? `alle ${v.interval ?? HEALTH_DEFAULT_INTERVAL[k]} ${(v.unit ?? HEALTH_INTERVAL_UNIT[k]) === "weeks" ? "Wo." : "Mon."}` : "Noch keine Angabe"}
                     {due && ` · nächster Termin ${fmtDate(due)}`}
                   </div>
                 </div>
@@ -313,7 +327,7 @@ function PferdDetail({ horse, user, onBack, onSave, onDelete }) {
               )}
             </div>
             {editKey === k ? (
-              <HealthEditForm item={v} defaultInterval={HEALTH_DEFAULT_INTERVAL[k]} onSave={(vals) => saveHealthItem(k, vals)} onCancel={() => setEditKey(null)} />
+              <HealthEditForm item={v} defaultInterval={HEALTH_DEFAULT_INTERVAL[k]} unit={HEALTH_INTERVAL_UNIT[k]} onSave={(vals) => saveHealthItem(k, vals)} onCancel={() => setEditKey(null)} />
             ) : (
               <button onClick={() => setEditKey(k)} style={{ ...btnGhost, marginTop: 8 }}>{v ? "Bearbeiten" : "Termin eintragen"}</button>
             )}
@@ -340,6 +354,36 @@ function PferdDetail({ horse, user, onBack, onSave, onDelete }) {
           </div>
         </Card>
       ))}
+
+      <SectionTitle right={<IconBtn onClick={() => setShowNewWeight(true)}><Plus size={15} /> Gewicht</IconBtn>}>
+        <Scale size={15} style={{ marginRight: 5, verticalAlign: -2 }} />Gewicht
+      </SectionTitle>
+      {weights.length === 0 && <Empty text="Noch kein Gewicht eingetragen." />}
+      {weights.length > 0 && (
+        <Card style={{ marginBottom: 8 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <div>
+              <div style={{ fontSize: 18, fontWeight: 700, color: COLOR.ink }}>{weights[0].weight_kg} kg</div>
+              <div style={{ fontSize: 11.5, color: COLOR.inkSoft }}>zuletzt gewogen {fmtDate(weights[0].date)} · {weights[0].user_name}</div>
+            </div>
+            {weights.length > 1 && (
+              <button onClick={() => setShowWeightHistory((v) => !v)} style={btnGhost}>
+                {showWeightHistory ? "Verlauf ausblenden" : `Verlauf (${weights.length})`}
+              </button>
+            )}
+          </div>
+          {showWeightHistory && weights.length > 1 && (
+            <div style={{ marginTop: 12, borderTop: `1px solid ${COLOR.line}`, paddingTop: 10 }}>
+              {weights.slice(1).map((w) => (
+                <div key={w.id} style={{ display: "flex", justifyContent: "space-between", padding: "4px 0", fontSize: 13 }}>
+                  <span style={{ color: COLOR.inkSoft }}>{fmtDate(w.date)}</span>
+                  <span style={{ color: COLOR.ink, fontWeight: 600 }}>{w.weight_kg} kg</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </Card>
+      )}
 
       <SectionTitle right={<IconBtn onClick={() => setShowNewMedication(true)}><Plus size={15} /> Medikament</IconBtn>}>
         <PillIcon size={15} style={{ marginRight: 5, verticalAlign: -2 }} />Medikamente
@@ -424,6 +468,7 @@ function PferdDetail({ horse, user, onBack, onSave, onDelete }) {
       {showNewPlan && <NewPlanModal onClose={() => setShowNewPlan(false)} onSave={addPlan} />}
       {showNewHealthNote && <NewHealthNoteModal onClose={() => setShowNewHealthNote(false)} onSave={addHealthNote} />}
       {showNewMedication && <NewMedicationModal onClose={() => setShowNewMedication(false)} onSave={addMedication} />}
+      {showNewWeight && <NewWeightModal onClose={() => setShowNewWeight(false)} onSave={addWeight} />}
 
       {viewerPhoto && (
         <PhotoViewerModal
@@ -469,17 +514,19 @@ function PhotoViewerModal({ photo, onClose, onUseAsProfile, onDelete }) {
   );
 }
 
-function HealthEditForm({ item, defaultInterval, onSave, onCancel }) {
+function HealthEditForm({ item, defaultInterval, unit, onSave, onCancel }) {
   const [last, setLastDate] = useState(item?.last || "");
   const [interval, setInterval] = useState(item?.interval ?? defaultInterval);
   const [next, setNext] = useState(item?.next || "");
   const [overrideNext, setOverrideNext] = useState(!!item?.next);
+  const unitLabel = unit === "weeks" ? "Wochen" : "Monate";
+  const previewDue = (l, i) => (unit === "weeks" ? addDays(l, Number(i || 0) * 7) : addMonths(l, i));
 
   return (
     <div style={{ marginTop: 10 }}>
       <label style={labelStyle}>Letzter Termin (optional)</label>
       <input type="date" style={inputStyle} value={last} onChange={(e) => setLastDate(e.target.value)} />
-      <label style={labelStyle}>Intervall (Monate)</label>
+      <label style={labelStyle}>Intervall ({unitLabel})</label>
       <input type="number" min="1" style={inputStyle} value={interval} onChange={(e) => setInterval(e.target.value)} />
       <label style={{ ...labelStyle, display: "flex", alignItems: "center", gap: 6 }}>
         <input type="checkbox" checked={overrideNext} onChange={(e) => setOverrideNext(e.target.checked)} />
@@ -490,7 +537,7 @@ function HealthEditForm({ item, defaultInterval, onSave, onCancel }) {
       )}
       {!overrideNext && (
         <div style={{ fontSize: 11.5, color: COLOR.inkSoft, marginTop: -8, marginBottom: 10 }}>
-          {last ? `Nächster Termin wird automatisch berechnet: ${fmtDate(addMonths(last, interval))}` : "Nächster Termin wird berechnet, sobald ein letzter Termin eingetragen ist."}
+          {last ? `Nächster Termin wird automatisch berechnet: ${fmtDate(previewDue(last, interval))}` : "Nächster Termin wird berechnet, sobald ein letzter Termin eingetragen ist."}
         </div>
       )}
       <div style={{ display: "flex", gap: 8 }}>
@@ -603,6 +650,27 @@ function NewMedicationModal({ onClose, onSave }) {
         disabled={!name.trim() || !dateFrom}
         onClick={() => onSave({ name: name.trim(), dosage: dosage.trim(), dateFrom, ongoing, dateTo, note: note.trim() })}
         style={{ ...btnPrimary, width: "100%", padding: "11px 0", opacity: (!name.trim() || !dateFrom) ? 0.5 : 1 }}
+      >Speichern</button>
+    </Modal>
+  );
+}
+
+function NewWeightModal({ onClose, onSave }) {
+  const [date, setDate] = useState(todayISO());
+  const [weightKg, setWeightKg] = useState("");
+  const [note, setNote] = useState("");
+  return (
+    <Modal title="Gewicht eintragen" onClose={onClose}>
+      <label style={labelStyle}>Datum</label>
+      <input type="date" style={inputStyle} value={date} onChange={(e) => setDate(e.target.value)} />
+      <label style={labelStyle}>Gewicht (kg)</label>
+      <input type="number" style={inputStyle} value={weightKg} onChange={(e) => setWeightKg(e.target.value)} placeholder="z. B. 520" />
+      <label style={labelStyle}>Notiz (optional)</label>
+      <input style={inputStyle} value={note} onChange={(e) => setNote(e.target.value)} />
+      <button
+        disabled={!weightKg}
+        onClick={() => onSave({ date, weightKg, note })}
+        style={{ ...btnPrimary, width: "100%", padding: "11px 0", opacity: !weightKg ? 0.5 : 1 }}
       >Speichern</button>
     </Modal>
   );

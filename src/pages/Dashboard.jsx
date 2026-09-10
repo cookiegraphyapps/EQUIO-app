@@ -37,7 +37,7 @@ export default function Dashboard({ user }) {
           if (!alreadyExists) {
             newReminders.push({
               title, description: `Fällig: ${fmtDate(due)}`, type: "uebernahme_erledigt",
-              date: t, horse_ids: [h.id], assigned_user: null, done: false, recurring: false,
+              date: t, horse_ids: [h.id], assigned_users: [], done: false, recurring: false,
             });
           }
         });
@@ -58,8 +58,8 @@ export default function Dashboard({ user }) {
   if (loading) return <Empty text="Lädt …" />;
 
   const t = todayISO();
-  const myTasks = tasks.filter((x) => x.assigned_user === user && !x.done && x.date <= addDays(t, 1));
-  const openTasks = tasks.filter((x) => x.date === t && !x.assigned_user && x.type !== "info");
+  const myTasks = tasks.filter((x) => (x.assigned_users || []).includes(user) && !x.done && x.date <= addDays(t, 1));
+  const openTasks = tasks.filter((x) => x.date === t && (x.assigned_users || []).length === 0 && x.type !== "info");
   const birthdaysToday = horses.filter((h) => h.born && h.born.slice(5, 10) === t.slice(5, 10)).map((h) => ({
     id: `bday-${h.id}`, title: `🎂 Geburtstag ${h.name}`, time: "",
   }));

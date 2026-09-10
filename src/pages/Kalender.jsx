@@ -63,7 +63,7 @@ export default function Kalender({ user }) {
     const list = [];
     events.filter((e) => d >= e.date && d <= (e.date_end || e.date)).forEach((e) => list.push({ ...e, kind: "gemeinsam" }));
     tasks.filter((t) => d >= t.date && d <= (t.date_end || t.date)).forEach((t) =>
-      list.push({ ...t, kind: t.type === "info" ? "gemeinsam" : !t.assigned_user ? "dringend" : t.done ? "erledigt" : "uebernommen" })
+      list.push({ ...t, kind: t.type === "info" ? "gemeinsam" : (t.assigned_users || []).length === 0 ? "dringend" : t.done ? "erledigt" : "uebernommen" })
     );
     personalEvents.filter((e) => e.date === d).forEach((e) => list.push({ ...e, kind: "privat" }));
     // Geburtstage: jedes Jahr automatisch am gleichen Tag, ohne eigenen Datenbank-Eintrag

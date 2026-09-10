@@ -28,7 +28,9 @@ export const HEALTH_LABELS = {
   entwurmung: { label: "Entwurmung" },
 };
 
-export const HEALTH_DEFAULT_INTERVAL = { impfung: 6, hufschmied: 2, zahnarzt: 12, entwurmung: 3 };
+export const HEALTH_DEFAULT_INTERVAL = { impfung: 6, hufschmied: 8, zahnarzt: 12, entwurmung: 3 };
+// Einheit des Intervalls je Kategorie – Hufschmied wird typischerweise in Wochen terminiert, der Rest in Monaten.
+export const HEALTH_INTERVAL_UNIT = { impfung: "months", hufschmied: "weeks", zahnarzt: "months", entwurmung: "months" };
 
 export const TASK_TYPES = {
   uebernahme: "Übernahme erforderlich",
@@ -60,11 +62,12 @@ export function daysUntil(iso) {
   return Math.round((b - a) / 86400000);
 }
 // Nächster Fälligkeitstermin: direkt gesetztes Datum (item.next) hat Vorrang,
-// sonst berechnet aus letztem Termin + Intervall (in Monaten).
+// sonst berechnet aus letztem Termin + Intervall (item.unit: "weeks" oder "months").
 export function nextDue(item) {
   if (item.next) return item.next;
   if (!item.last) return null;
-  return addMonths(item.last, item.interval ?? 6);
+  const interval = item.interval ?? 6;
+  return item.unit === "weeks" ? addDays(item.last, interval * 7) : addMonths(item.last, interval);
 }
 
 export function Pill({ children, bg, fg, style }) {
