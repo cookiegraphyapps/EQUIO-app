@@ -1,6 +1,6 @@
-import { useEffect, useState } from "react";
-import { AlertTriangle, CheckCircle2, Trash2 } from "lucide-react";
-import { supabase } from "../supabaseClient";
+import { useEffect, useRef, useState } from "react";
+import { AlertTriangle, CheckCircle2, Trash2, Camera } from "lucide-react";
+import { supabase, uploadPhoto } from "../supabaseClient";
 import { Card, SectionTitle, Empty, Pill, COLOR, todayISO, addDays, fmtDate, daysUntil, nextDue, dateToISO, HEALTH_LABELS, inputStyle, btnPrimary } from "../components/ui";
 
 function relativeDay(timestamp) {
@@ -8,6 +8,13 @@ function relativeDay(timestamp) {
   if (diff <= 0) return "heute";
   if (diff === 1) return "gestern";
   return `vor ${diff} Tagen`;
+}
+
+// Extrahiert den Storage-Pfad aus einer öffentlichen Supabase-URL, um die Datei gezielt löschen zu können.
+function storagePathFromUrl(url) {
+  const marker = "/horse-photos/";
+  const i = url.indexOf(marker);
+  return i >= 0 ? url.slice(i + marker.length) : null;
 }
 
 export default function Dashboard({ user }) {
@@ -18,26 +25,52 @@ export default function Dashboard({ user }) {
   const [expenses, setExpenses] = useState([]);
   const [news, setNews] = useState([]);
   const [newsText, setNewsText] = useState("");
+  const [newsPhotoFile, setNewsPhotoFile] = useState(null);
+  const [newsPhotoPreview, setNewsPhotoPreview] = useState(null);
   const [postingNews, setPostingNews] = useState(false);
+  const newsPhotoInput = useRef(null);
 
   const loadNews = async () => {
     const cutoff = new Date(Date.now() - 5 * 86400000).toISOString();
-    const { data } = await supabase.from("news").select("*").gte("created_at", cutoff).order("created_at", { ascending: false });
+    // Abgelaufene Neuigkeiten (inkl. Foto) endgültig aus Datenbank & Speicher entfernen,
+    // damit sich über die Zeit keine Altdaten ansammeln.
+    const { data: expired } = await supabase.from("news").select("id, photo_url").lt("created_at", cutoff);
+    if (expired && expired.length > 0) {
+      const paths = expired.map((n) => n.photo_url && storagePathFromUrl(n.photo_url)).filter(Boolean);
+      if (paths.length > 0) await supabase.storage.from("horse-photos").remove(paths);
+      await supabase.from("news").delete().lt("created_at", cutoff);
+    }
+    const { data } = await supabase.from("news").select("*").order("created_at", { ascending: false });
     setNews(data ?? []);
+  };
+
+  const onNewsPhotoChange = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setNewsPhotoFile(file);
+    setNewsPhotoPreview(URL.createObjectURL(file));
   };
 
   const postNews = async () => {
     const text = newsText.trim();
     if (!text) return;
     setPostingNews(true);
-    await supabase.from("news").insert({ user_name: user, text });
+    let photoUrl = null;
+    if (newsPhotoFile) photoUrl = await uploadPhoto(newsPhotoFile, "news");
+    await supabase.from("news").insert({ user_name: user, text, photo_url: photoUrl });
     setNewsText("");
+    setNewsPhotoFile(null);
+    setNewsPhotoPreview(null);
     setPostingNews(false);
     loadNews();
   };
 
-  const deleteNews = async (id) => {
-    await supabase.from("news").delete().eq("id", id);
+  const deleteNews = async (n) => {
+    if (n.photo_url) {
+      const path = storagePathFromUrl(n.photo_url);
+      if (path) await supabase.storage.from("horse-photos").remove([path]);
+    }
+    await supabase.from("news").delete().eq("id", n.id);
     loadNews();
   };
 
@@ -129,18 +162,31 @@ export default function Dashboard({ user }) {
             onKeyDown={(e) => { if (e.key === "Enter") postNews(); }}
             placeholder="Kurze Nachricht an alle …"
           />
+          <button onClick={() => newsPhotoInput.current?.click()} type="button" style={{ background: "none", border: `1px solid ${COLOR.line}`, borderRadius: 9, padding: "0 12px", cursor: "pointer", color: COLOR.inkSoft }}>
+            <Camera size={16} />
+          </button>
+          <input ref={newsPhotoInput} type="file" accept="image/*" style={{ display: "none" }} onChange={onNewsPhotoChange} />
           <button onClick={postNews} disabled={postingNews || !newsText.trim()} style={{ ...btnPrimary, opacity: newsText.trim() ? 1 : 0.5 }}>Posten</button>
         </div>
+        {newsPhotoPreview && (
+          <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 10 }}>
+            <img src={newsPhotoPreview} alt="" style={{ width: 48, height: 48, borderRadius: 8, objectFit: "cover" }} />
+            <button type="button" onClick={() => { setNewsPhotoFile(null); setNewsPhotoPreview(null); }} style={{ background: "none", border: "none", color: COLOR.inkSoft, cursor: "pointer", fontSize: 12.5 }}>Entfernen</button>
+          </div>
+        )}
       </Card>
       {news.length === 0 && <Empty text="Keine aktuellen Neuigkeiten." />}
       {news.map((n) => (
         <Card key={n.id} style={{ marginBottom: 8, display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
-          <div>
-            <div style={{ fontSize: 14, color: COLOR.ink }}>{n.text}</div>
-            <div style={{ fontSize: 11.5, color: COLOR.inkSoft, marginTop: 3 }}>{n.user_name} · {relativeDay(n.created_at)}</div>
+          <div style={{ display: "flex", gap: 10 }}>
+            {n.photo_url && <img src={n.photo_url} alt="" style={{ width: 52, height: 52, borderRadius: 8, objectFit: "cover", flexShrink: 0 }} />}
+            <div>
+              <div style={{ fontSize: 14, color: COLOR.ink }}>{n.text}</div>
+              <div style={{ fontSize: 11.5, color: COLOR.inkSoft, marginTop: 3 }}>{n.user_name} · {relativeDay(n.created_at)}</div>
+            </div>
           </div>
           {n.user_name === user && (
-            <button onClick={() => deleteNews(n.id)} style={{ background: "none", border: "none", padding: 2, cursor: "pointer", color: COLOR.inkSoft, flexShrink: 0 }}>
+            <button onClick={() => deleteNews(n)} style={{ background: "none", border: "none", padding: 2, cursor: "pointer", color: COLOR.inkSoft, flexShrink: 0 }}>
               <Trash2 size={14} />
             </button>
           )}

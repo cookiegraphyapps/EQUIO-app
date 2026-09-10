@@ -129,6 +129,7 @@ create table if not exists news (
   id uuid primary key default gen_random_uuid(),
   user_name text not null,
   text text not null,
+  photo_url text,
   created_at timestamptz default now()
 );
 
@@ -201,6 +202,7 @@ alter table expenses add column if not exists horse_id uuid references horses(id
 -- Fotos: Profilbild pro Pferd + Foto bei Gesundheitsnotiz
 alter table horses add column if not exists photo_url text;
 alter table health_notes add column if not exists photo_url text;
+alter table news add column if not exists photo_url text;
 
 -- Fotogalerie pro Pferd
 create table if not exists horse_photos (
