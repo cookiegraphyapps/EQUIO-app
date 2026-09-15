@@ -218,6 +218,62 @@ create table if not exists turnout_plan_settings (
 );
 insert into turnout_plan_settings (id, start_date) values (1, null) on conflict (id) do nothing;
 
+-- Dienstleister (Tierärzte, Physio-/Osteopathen, …) – Kategorien frei erweiterbar wie bei Aufgaben.
+create table if not exists service_provider_categories (
+  id uuid primary key default gen_random_uuid(),
+  key text not null unique,
+  label text not null,
+  created_at timestamptz default now()
+);
+insert into service_provider_categories (key, label) values
+  ('tierarzt', 'Tierarzt'),
+  ('physio_osteo', 'Physio-/Osteopath:in'),
+  ('hufbearbeitung', 'Hufbearbeitung')
+on conflict (key) do nothing;
+
+create table if not exists service_providers (
+  id uuid primary key default gen_random_uuid(),
+  category text not null default 'tierarzt',
+  name text not null,
+  phone text,
+  specialty text,
+  notes text,
+  created_at timestamptz default now()
+);
+-- Unique-Constraint nachrüsten, falls die Tabelle schon vorher (ohne diese Regel) angelegt wurde.
+do $$ begin
+  alter table service_providers add constraint service_providers_name_key unique (name);
+exception when duplicate_object then null;
+end $$;
+
+-- Startbestand: recherchierte Pferdetierärzte und Physio-/Osteopath:innen im Raum 66663 Merzig.
+-- Bitte Angaben (v.a. Telefonnummern bei den Physio-/Osteopath:innen) noch einmal selbst prüfen/ergänzen.
+insert into service_providers (category, name, phone, specialty, notes) values
+  ('tierarzt', 'Mobile Tierarztpraxis Dr. B. Schubert', '06861 938966 (mobil 0171 7742651)', 'Ausschließlich Pferde', 'Fremersdorf, ca. 10–15 km von Merzig'),
+  ('tierarzt', 'Pferdeklinik Altforweiler (Dr. Andreas Rupp)', '06836 919080', 'Pferdeklinik', 'Überherrn'),
+  ('tierarzt', 'Tierärztin Groß – Pferdefahrpraxis', '06831 42778', 'Pferde, Fahrpraxis', 'Saarlouis'),
+  ('tierarzt', 'Tierärzte Drs. Besse', '06881 2178', 'Kleintier- und Pferdefahrpraxis', 'Lebach'),
+  ('physio_osteo', 'Sabine Seiffarth – Pferdeosteopathie', null, 'Osteopathie', 'Mobil, fährt u.a. Merzig, Saarlouis, Saarbrücken, Neunkirchen, St. Wendel an – Kontakt über Website, Telefonnummer noch ergänzen'),
+  ('physio_osteo', 'Zoé Heblich – Pferdephysiotherapie & -osteopathie', null, 'Physiotherapie, Osteopathie', 'Mobil im Saarland – Telefonnummer noch ergänzen'),
+  ('physio_osteo', 'Manfred Klein – Pferdeosteopathie Saarland', null, 'Osteopathie', 'Raum Trier/Saarland – Telefonnummer noch ergänzen'),
+  ('physio_osteo', 'Annika Schmidt – Pferdephysiotherapie', null, 'Physiotherapie, Osteopathie', 'Mobil im Saarland – Telefonnummer noch ergänzen'),
+  ('hufbearbeitung', 'Tanja Selzer', '0160 5035615', 'Barhufbearbeitung', 'Perler Straße 21, 66663 Merzig · info@hufbearbeitung-selzer.de')
+on conflict (name) do nothing;
+
+-- Bewertung/Einschätzung ist öffentlich sichtbar (wichtig im Notfall!), aber jede:r bearbeitet nur die eigene.
+create table if not exists service_provider_reviews (
+  id uuid primary key default gen_random_uuid(),
+  provider_id uuid not null references service_providers(id) on delete cascade,
+  user_id uuid not null references auth.users(id) on delete cascade,
+  user_name text not null,
+  rating int,
+  verdict text not null default 'ja', -- ja | notfall | nein
+  comment text,
+  created_at timestamptz default now(),
+  updated_at timestamptz default now(),
+  unique (provider_id, user_id)
+);
+
 -- Mehrere Personen pro Aufgabe zuweisen können (manche Aufgaben schafft man nicht allein)
 alter table tasks add column if not exists assigned_users text[] default '{}';
 update tasks set assigned_users = array[assigned_user]
@@ -275,6 +331,9 @@ alter table horse_expenses enable row level security;
 alter table task_categories enable row level security;
 alter table turnout_plan_stages enable row level security;
 alter table turnout_plan_settings enable row level security;
+alter table service_provider_categories enable row level security;
+alter table service_providers enable row level security;
+alter table service_provider_reviews enable row level security;
 
 -- Profile: jede:r sieht alle Namen (für Zuordnung), bearbeitet nur sich selbst.
 -- Entfernen (löschen) eines Profils nur durch Admin.
@@ -358,6 +417,34 @@ create policy "turnout_plan_stages_delete_admin" on turnout_plan_stages for dele
 create policy "turnout_plan_settings_select" on turnout_plan_settings for select using (auth.role() = 'authenticated');
 create policy "turnout_plan_settings_update_admin" on turnout_plan_settings for update
   using (exists (select 1 from profiles p2 where p2.id = auth.uid() and p2.is_admin = true));
+
+-- Dienstleister-Kategorien: alle lesen, nur Admin verwaltet (wie bei Aufgaben-Kategorien)
+drop policy if exists "service_provider_categories_select" on service_provider_categories;
+drop policy if exists "service_provider_categories_insert_admin" on service_provider_categories;
+drop policy if exists "service_provider_categories_delete_admin" on service_provider_categories;
+create policy "service_provider_categories_select" on service_provider_categories for select using (auth.role() = 'authenticated');
+create policy "service_provider_categories_insert_admin" on service_provider_categories for insert
+  with check (exists (select 1 from profiles p2 where p2.id = auth.uid() and p2.is_admin = true));
+create policy "service_provider_categories_delete_admin" on service_provider_categories for delete
+  using (exists (select 1 from profiles p2 where p2.id = auth.uid() and p2.is_admin = true));
+
+-- Dienstleister-Einträge: alle lesen/anlegen/bearbeiten, nur Admin löscht (wie bei Pferden)
+drop policy if exists "service_providers_select" on service_providers;
+drop policy if exists "service_providers_insert" on service_providers;
+drop policy if exists "service_providers_update" on service_providers;
+drop policy if exists "service_providers_delete_admin" on service_providers;
+create policy "service_providers_select" on service_providers for select using (auth.role() = 'authenticated');
+create policy "service_providers_insert" on service_providers for insert with check (auth.role() = 'authenticated');
+create policy "service_providers_update" on service_providers for update using (auth.role() = 'authenticated');
+create policy "service_providers_delete_admin" on service_providers for delete
+  using (exists (select 1 from profiles p2 where p2.id = auth.uid() and p2.is_admin = true));
+
+-- Bewertungen: für alle öffentlich lesbar, aber jede:r bearbeitet nur die eigene Einschätzung
+drop policy if exists "service_provider_reviews_select" on service_provider_reviews;
+drop policy if exists "service_provider_reviews_own" on service_provider_reviews;
+create policy "service_provider_reviews_select" on service_provider_reviews for select using (auth.role() = 'authenticated');
+create policy "service_provider_reviews_own" on service_provider_reviews for all
+  using (auth.uid() = user_id) with check (auth.uid() = user_id);
 
 -- Private Termine, Trainingsplanung & Rechnungen: nur der/die Ersteller:in sieht & bearbeitet eigene Einträge
 drop policy if exists "personal_events_own" on personal_events;
