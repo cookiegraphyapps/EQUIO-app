@@ -248,10 +248,11 @@ function NewEventModal({ people, horses, initialDate, editing, onClose, onSave, 
 
   const startPackList = async () => {
     if (!packCategory) return;
-    await createPackingList({
+    const { error } = await createPackingList({
       category: packCategory, title: `${PACKING_CATEGORIES[packCategory]} – ${title}`, date,
       horseIds: packHorseIds, people: packPeople, eventId: editing.id,
     });
+    if (error) { alert("Konnte nicht gespeichert werden – bitte sicherstellen, dass die Datenbank auf dem neuesten Stand ist (aktuelles SQL-Skript ausgeführt)."); return; }
     await reloadPackList();
     setView("packlist");
   };

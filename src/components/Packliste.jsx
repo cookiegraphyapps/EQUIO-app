@@ -32,23 +32,28 @@ export async function createPackingList({ category, title, date, horseIds, peopl
     category, title: title || PACKING_CATEGORIES[category], date: date || null,
     horse_ids: horseIds, people, event_id: eventId || null, status: "active",
   }).select().single();
-  if (error || !list) return null;
+  if (error || !list) return { id: null, error: error || new Error("Liste konnte nicht angelegt werden") };
   const items = [];
   tpl.forEach((t) => {
     if (t.scope === "shared") items.push({ list_id: list.id, text: t.item_text, scope: "shared" });
     else if (t.scope === "per_horse") horseIds.forEach((hid) => items.push({ list_id: list.id, text: t.item_text, scope: "per_horse", horse_id: hid }));
     else if (t.scope === "per_person") people.forEach((p) => items.push({ list_id: list.id, text: t.item_text, scope: "per_person", person_name: p }));
   });
-  if (items.length > 0) await supabase.from("packing_items").insert(items);
-  return list.id;
+  let itemsError = null;
+  if (items.length > 0) {
+    const res = await supabase.from("packing_items").insert(items);
+    itemsError = res.error;
+  }
+  return { id: list.id, error: itemsError || null };
 }
 
 export async function togglePackingItem(item) {
   await supabase.from("packing_items").update({ done: !item.done }).eq("id", item.id);
 }
 export async function addPackingItem(listId, text, scope, horseId, personName) {
-  if (!text.trim()) return;
-  await supabase.from("packing_items").insert({ list_id: listId, text: text.trim(), scope, horse_id: horseId || null, person_name: personName || null });
+  if (!text.trim()) return null;
+  const { error } = await supabase.from("packing_items").insert({ list_id: listId, text: text.trim(), scope, horse_id: horseId || null, person_name: personName || null });
+  return error;
 }
 export async function deletePackingItem(id) {
   await supabase.from("packing_items").delete().eq("id", id);
@@ -104,7 +109,11 @@ export function ListDetail({ list, horses, onBack, onChanged, embedded }) {
   const sharedItems = items.filter((i) => i.scope === "shared");
   const horseNames = Object.fromEntries(horses.map((h) => [h.id, h.name]));
 
-  const doAdd = async (text, scope, horseId, personName) => { await addPackingItem(list.id, text, scope, horseId, personName); onChanged(); };
+  const doAdd = async (text, scope, horseId, personName) => {
+    const error = await addPackingItem(list.id, text, scope, horseId, personName);
+    if (error) { alert("Konnte nicht gespeichert werden – bitte sicherstellen, dass die Datenbank auf dem neuesten Stand ist (aktuelles SQL-Skript ausgeführt)."); return; }
+    onChanged();
+  };
   const doToggle = async (item) => { await togglePackingItem(item); onChanged(); };
   const doDelete = async (id) => { await deletePackingItem(id); onChanged(); };
   const doAssign = async (id, personName) => { await assignPackingItem(id, personName); onChanged(); };
@@ -402,7 +411,8 @@ export default function PacklistenOverview({ onClose }) {
   useEffect(() => { load(); }, []);
 
   const startList = async (category, data) => {
-    await createPackingList({ category, title: data.title, date: data.date, horseIds: data.horseIds, people: data.people });
+    const { error } = await createPackingList({ category, title: data.title, date: data.date, horseIds: data.horseIds, people: data.people });
+    if (error) { alert("Konnte nicht gespeichert werden – bitte sicherstellen, dass die Datenbank auf dem neuesten Stand ist (aktuelles SQL-Skript ausgeführt)."); return; }
     setShowNewFor(null);
     load();
   };
