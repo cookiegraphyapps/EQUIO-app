@@ -240,7 +240,21 @@ export function ListDetail({ list, horses, onBack, onChanged, embedded }) {
             </div>
           ) : (
             <button onClick={() => setConfirmDelete(true)} style={{ background: "none", border: "none", cursor: "pointer", color: COLOR.dringend, fontSize: 12 }}>
-              Ohne Speichern löschen
+              Liste löschen
+            </button>
+          )}
+        </div>
+      )}
+      {readOnly && (
+        <div style={{ marginTop: 12 }}>
+          {confirmDelete ? (
+            <div style={{ display: "flex", gap: 8 }}>
+              <button onClick={doDeleteList} style={{ ...btnPrimary, background: COLOR.dringend, flex: 1 }}>Wirklich löschen</button>
+              <button onClick={() => setConfirmDelete(false)} style={{ ...btnGhost, flex: 1 }}>Abbrechen</button>
+            </div>
+          ) : (
+            <button onClick={() => setConfirmDelete(true)} style={{ background: "none", border: "none", cursor: "pointer", color: COLOR.dringend, fontSize: 12 }}>
+              Beispiel löschen
             </button>
           )}
         </div>
