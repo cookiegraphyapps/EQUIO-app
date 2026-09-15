@@ -111,7 +111,7 @@ export function ListDetail({ list, horses, onBack, onChanged, embedded }) {
 
   const doAdd = async (text, scope, horseId, personName) => {
     const error = await addPackingItem(list.id, text, scope, horseId, personName);
-    if (error) { alert("Konnte nicht gespeichert werden – bitte sicherstellen, dass die Datenbank auf dem neuesten Stand ist (aktuelles SQL-Skript ausgeführt)."); return; }
+    if (error) { alert("Konnte nicht gespeichert werden: " + (error.message || JSON.stringify(error))); return; }
     onChanged();
   };
   const doToggle = async (item) => { await togglePackingItem(item); onChanged(); };
@@ -426,7 +426,7 @@ export default function PacklistenOverview({ onClose }) {
 
   const startList = async (category, data) => {
     const { error } = await createPackingList({ category, title: data.title, date: data.date, horseIds: data.horseIds, people: data.people });
-    if (error) { alert("Konnte nicht gespeichert werden – bitte sicherstellen, dass die Datenbank auf dem neuesten Stand ist (aktuelles SQL-Skript ausgeführt)."); return; }
+    if (error) { alert("Konnte nicht gespeichert werden: " + (error.message || JSON.stringify(error))); return; }
     setShowNewFor(null);
     load();
   };

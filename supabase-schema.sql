@@ -565,6 +565,7 @@ create table if not exists packing_items (
   created_at timestamptz default now()
 );
 alter table packing_items add column if not exists assigned_to text;
+alter table packing_items add column if not exists person_name text;
 
 alter table packing_templates enable row level security;
 alter table packing_lists enable row level security;

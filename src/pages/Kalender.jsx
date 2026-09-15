@@ -252,7 +252,7 @@ function NewEventModal({ people, horses, initialDate, editing, onClose, onSave, 
       category: packCategory, title: `${PACKING_CATEGORIES[packCategory]} – ${title}`, date,
       horseIds: packHorseIds, people: packPeople, eventId: editing.id,
     });
-    if (error) { alert("Konnte nicht gespeichert werden – bitte sicherstellen, dass die Datenbank auf dem neuesten Stand ist (aktuelles SQL-Skript ausgeführt)."); return; }
+    if (error) { alert("Konnte nicht gespeichert werden: " + (error.message || JSON.stringify(error))); return; }
     await reloadPackList();
     setView("packlist");
   };
