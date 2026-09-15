@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
-import { ChevronLeft, ChevronRight, Plus } from "lucide-react";
+import { ChevronLeft, ChevronRight, Plus, Briefcase } from "lucide-react";
 import { supabase } from "../supabaseClient";
 import { SectionTitle, IconBtn, Modal, COLOR, todayISO, addMonths, dateToISO, parseISODate, fmtDate, inputStyle, labelStyle, btnPrimary, btnGhost, navBtn } from "../components/ui";
+import PacklistenOverview, { PACKING_CATEGORIES, createPackingList, fetchPackingListForEvent, ListDetail } from "../components/Packliste";
 
 const WEEKDAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 
@@ -38,6 +39,7 @@ export default function Kalender({ user }) {
   const [personalEvents, setPersonalEvents] = useState([]);
   const [people, setPeople] = useState([]);
   const [horses, setHorses] = useState([]);
+  const [showPacklisten, setShowPacklisten] = useState(false);
 
   const grid = monthGrid(cursor);
 
@@ -112,9 +114,18 @@ export default function Kalender({ user }) {
   const monthLabel = new Date(grid.year, grid.month, 1).toLocaleDateString("de-DE", { month: "long", year: "numeric" });
   const selectedList = entriesForDay(selectedDay);
 
+  if (showPacklisten) {
+    return <PacklistenOverview onClose={() => setShowPacklisten(false)} />;
+  }
+
   return (
     <div>
-      <SectionTitle right={<IconBtn onClick={() => setShowNew(true)}><Plus size={15} /> Termin</IconBtn>}>Kalender</SectionTitle>
+      <SectionTitle right={
+        <div style={{ display: "flex", gap: 6 }}>
+          <IconBtn onClick={() => setShowPacklisten(true)}><Briefcase size={15} /> Packlisten</IconBtn>
+          <IconBtn onClick={() => setShowNew(true)}><Plus size={15} /> Termin</IconBtn>
+        </div>
+      }>Kalender</SectionTitle>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
         <button onClick={() => setCursor(addMonths(cursor, -1))} style={navBtn}><ChevronLeft size={16} /></button>
         <span style={{ fontSize: 13.5, color: COLOR.ink, fontWeight: 700, textTransform: "capitalize" }}>{monthLabel}</span>
@@ -187,10 +198,11 @@ export default function Kalender({ user }) {
         <Legend c={COLOR.uebernommen} label="Übernommen" />
         <Legend c={COLOR.erledigt} label="Erledigt" />
       </div>
-      {showNew && <NewEventModal people={people} initialDate={selectedDay} onClose={() => setShowNew(false)} onSave={addEntry} />}
+      {showNew && <NewEventModal people={people} horses={horses} initialDate={selectedDay} onClose={() => setShowNew(false)} onSave={addEntry} />}
       {editEntry && (
         <NewEventModal
           people={people}
+          horses={horses}
           initialDate={editEntry.date}
           editing={editEntry}
           onClose={() => setEditEntry(null)}
@@ -206,7 +218,7 @@ function Legend({ c, label }) {
   return <span style={{ display: "flex", alignItems: "center", gap: 4 }}><span style={{ width: 7, height: 7, borderRadius: 4, background: c }} />{label}</span>;
 }
 
-function NewEventModal({ people, initialDate, editing, onClose, onSave, onDelete }) {
+function NewEventModal({ people, horses, initialDate, editing, onClose, onSave, onDelete }) {
   const [title, setTitle] = useState(editing?.title || "");
   const [date, setDate] = useState(editing?.date || initialDate || todayISO());
   const [dateEnd, setDateEnd] = useState(editing?.date_end || "");
@@ -214,7 +226,51 @@ function NewEventModal({ people, initialDate, editing, onClose, onSave, onDelete
   const [kind, setKind] = useState(editing?.kind || "gemeinsam");
   const [withUser, setWithUser] = useState(editing?.with_user || "");
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [view, setView] = useState("event"); // event | packlist
+  const [packList, setPackList] = useState(null);
+  const [packLoading, setPackLoading] = useState(!!editing);
+  const [packCategory, setPackCategory] = useState(null);
+  const [packHorseIds, setPackHorseIds] = useState([]);
+  const [packPeople, setPackPeople] = useState([]);
+  const [packCustomName, setPackCustomName] = useState("");
   const toggleBtn = { flex: 1, padding: "8px 0", borderRadius: 9, border: `1px solid ${COLOR.line}`, background: "#fff", fontSize: 13, fontWeight: 600, cursor: "pointer" };
+
+  useEffect(() => {
+    if (!editing || kind !== "gemeinsam") { setPackLoading(false); return; }
+    fetchPackingListForEvent(editing.id).then((l) => { setPackList(l); setPackLoading(false); });
+  }, [editing, kind]);
+
+  const reloadPackList = async () => {
+    if (!editing) return;
+    const l = await fetchPackingListForEvent(editing.id);
+    setPackList(l);
+  };
+
+  const startPackList = async () => {
+    if (!packCategory) return;
+    await createPackingList({
+      category: packCategory, title: `${PACKING_CATEGORIES[packCategory]} – ${title}`, date,
+      horseIds: packHorseIds, people: packPeople, eventId: editing.id,
+    });
+    await reloadPackList();
+    setView("packlist");
+  };
+  const togglePackHorse = (id) => setPackHorseIds((h) => (h.includes(id) ? h.filter((x) => x !== id) : [...h, id]));
+  const togglePackPerson = (p) => setPackPeople((a) => (a.includes(p) ? a.filter((x) => x !== p) : [...a, p]));
+  const addPackCustomPerson = () => {
+    const n = packCustomName.trim();
+    if (n && !packPeople.includes(n)) setPackPeople((a) => [...a, n]);
+    setPackCustomName("");
+  };
+
+  if (view === "packlist" && packList) {
+    return (
+      <Modal title="Packliste" onClose={onClose}>
+        <ListDetail list={packList} horses={horses} onBack={() => setView("event")} onChanged={reloadPackList} embedded />
+      </Modal>
+    );
+  }
+
   return (
     <Modal title={editing ? "Termin bearbeiten" : "Neuer Termin"} onClose={onClose}>
       <label style={labelStyle}>Titel</label>
@@ -242,6 +298,66 @@ function NewEventModal({ people, initialDate, editing, onClose, onSave, onDelete
             {people.map((p) => <option key={p} value={p}>{p}</option>)}
           </select>
         </>
+      )}
+      {editing && kind === "gemeinsam" && !packLoading && (
+        <div style={{ marginTop: 4, marginBottom: 16, padding: 12, background: "#F3ECDD", borderRadius: 10 }}>
+          <div style={{ fontSize: 12.5, fontWeight: 700, color: COLOR.ink, marginBottom: 8, display: "flex", alignItems: "center", gap: 5 }}>
+            🎒 Packliste
+          </div>
+          {packList ? (
+            <button type="button" onClick={() => setView("packlist")} style={{ ...btnPrimary, width: "100%" }}>
+              {packList.title} · {(packList.packing_items || []).filter((i) => i.done).length}/{(packList.packing_items || []).length} erledigt
+            </button>
+          ) : (
+            <>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 8 }}>
+                {Object.entries(PACKING_CATEGORIES).map(([k, v]) => (
+                  <button key={k} type="button" onClick={() => setPackCategory(k)} style={{
+                    padding: "5px 10px", borderRadius: 999, border: `1px solid ${packCategory === k ? COLOR.accent : COLOR.line}`,
+                    background: packCategory === k ? "#fff" : "transparent", fontSize: 11.5, cursor: "pointer", color: COLOR.ink,
+                  }}>{v}</button>
+                ))}
+              </div>
+              {packCategory && (
+                <>
+                  <div style={{ fontSize: 11, color: COLOR.inkSoft, marginBottom: 4 }}>Welche Pferde?</div>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 8 }}>
+                    {horses.map((h) => (
+                      <button key={h.id} type="button" onClick={() => togglePackHorse(h.id)} style={{
+                        padding: "5px 10px", borderRadius: 999, border: `1px solid ${packHorseIds.includes(h.id) ? COLOR.accent : COLOR.line}`,
+                        background: packHorseIds.includes(h.id) ? "#fff" : "transparent", fontSize: 11.5, cursor: "pointer", color: COLOR.ink,
+                      }}>{h.name}</button>
+                    ))}
+                  </div>
+                  <div style={{ fontSize: 11, color: COLOR.inkSoft, marginBottom: 4 }}>Wer kommt mit?</div>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 6 }}>
+                    {people.map((p) => (
+                      <button key={p} type="button" onClick={() => togglePackPerson(p)} style={{
+                        padding: "5px 10px", borderRadius: 999, border: `1px solid ${packPeople.includes(p) ? COLOR.accent : COLOR.line}`,
+                        background: packPeople.includes(p) ? "#fff" : "transparent", fontSize: 11.5, cursor: "pointer", color: COLOR.ink,
+                      }}>{p}</button>
+                    ))}
+                    {packPeople.filter((n) => !people.includes(n)).map((n) => (
+                      <button key={n} type="button" onClick={() => togglePackPerson(n)} style={{
+                        padding: "5px 10px", borderRadius: 999, border: `1px solid ${COLOR.accent}`, background: "#fff", fontSize: 11.5, cursor: "pointer", color: COLOR.ink,
+                      }}>{n} ✕</button>
+                    ))}
+                  </div>
+                  <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
+                    <input
+                      style={{ ...inputStyle, marginBottom: 0, flex: 1, fontSize: 12.5 }} value={packCustomName}
+                      onChange={(e) => setPackCustomName(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addPackCustomPerson(); } }}
+                      placeholder="Eigenen Namen hinzufügen"
+                    />
+                    <button type="button" onClick={addPackCustomPerson} style={btnGhost}>+</button>
+                  </div>
+                  <button type="button" onClick={startPackList} style={{ ...btnPrimary, width: "100%" }}>Packliste erstellen</button>
+                </>
+              )}
+            </>
+          )}
+        </div>
       )}
       <button disabled={!title.trim()} onClick={() => onSave({ title: title.trim(), date, dateEnd, time, kind, withUser })} style={{ ...btnPrimary, width: "100%", padding: "11px 0", opacity: title.trim() ? 1 : 0.5 }}>
         {editing ? "Speichern" : "Termin speichern"}

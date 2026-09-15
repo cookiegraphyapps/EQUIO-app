@@ -475,26 +475,69 @@ insert into packing_templates (category, item_text, scope, order_index) values
   ('umzug', 'Zaunmaterial', 'shared', 1),
   ('umzug', 'Wassereimer', 'shared', 2),
   ('umzug', 'Schubkarre/Mistgabel', 'shared', 3),
-  ('umzug', 'Halfter + Strick', 'per_horse', 4),
-  ('umzug', 'Futter', 'per_horse', 5),
-  ('umzug', 'Medikamente', 'per_horse', 6),
-  ('umzug', 'Pferdepass', 'per_horse', 7),
+  ('umzug', 'Werkzeugkasten', 'shared', 4),
+  ('umzug', 'Taschenlampe', 'shared', 5),
+  ('umzug', 'Notfallnummern/Tierarzt-Kontakt', 'shared', 6),
+  ('umzug', 'Halfter + Strick', 'per_horse', 7),
+  ('umzug', 'Futter', 'per_horse', 8),
+  ('umzug', 'Medikamente', 'per_horse', 9),
+  ('umzug', 'Pferdepass', 'per_horse', 10),
+  ('umzug', 'Decke', 'per_horse', 11),
+  ('umzug', 'Putzzeug', 'per_horse', 12),
+  ('umzug', 'Fliegenspray', 'per_horse', 13),
+  ('umzug', 'Ersatzhalfter/-strick', 'per_horse', 14),
+  ('umzug', 'Arbeitshandschuhe', 'per_person', 15),
+  ('umzug', 'Wetterfeste Kleidung', 'per_person', 16),
+  ('umzug', 'Gummistiefel', 'per_person', 17),
   ('wanderritt_1tag', 'Erste-Hilfe-Set Pferd', 'shared', 1),
   ('wanderritt_1tag', 'Hufkratzer', 'shared', 2),
-  ('wanderritt_1tag', 'Sattel + Zubehör', 'per_horse', 3),
-  ('wanderritt_1tag', 'Wasser/Eimer für Pferd', 'per_horse', 4),
-  ('wanderritt_1tag', 'Pferdepass', 'per_horse', 5),
+  ('wanderritt_1tag', 'Kartenmaterial/Route', 'shared', 3),
+  ('wanderritt_1tag', 'Handy aufgeladen', 'shared', 4),
+  ('wanderritt_1tag', 'Bargeld', 'shared', 5),
+  ('wanderritt_1tag', 'Sattel + Zubehör', 'per_horse', 6),
+  ('wanderritt_1tag', 'Wasser/Eimer für Pferd', 'per_horse', 7),
+  ('wanderritt_1tag', 'Pferdepass', 'per_horse', 8),
+  ('wanderritt_1tag', 'Fliegenspray', 'per_horse', 9),
+  ('wanderritt_1tag', 'Ersatzhalfter/-strick', 'per_horse', 10),
+  ('wanderritt_1tag', 'Möhren/Leckerlis', 'per_horse', 11),
+  ('wanderritt_1tag', 'Reithelm', 'per_person', 12),
+  ('wanderritt_1tag', 'Trinkflasche', 'per_person', 13),
+  ('wanderritt_1tag', 'Regenjacke', 'per_person', 14),
+  ('wanderritt_1tag', 'Sonnencreme', 'per_person', 15),
+  ('wanderritt_1tag', 'Handschuhe', 'per_person', 16),
+  ('wanderritt_1tag', 'Proviant/Snacks', 'per_person', 17),
   ('wanderritt_mehrtaegig', 'Erste-Hilfe-Set Pferd', 'shared', 1),
   ('wanderritt_mehrtaegig', 'Zelt/Unterkunft-Material', 'shared', 2),
-  ('wanderritt_mehrtaegig', 'Sattel + Zubehör', 'per_horse', 3),
-  ('wanderritt_mehrtaegig', 'Futter für alle Tage', 'per_horse', 4),
-  ('wanderritt_mehrtaegig', 'Decke/Übernachtungsausrüstung', 'per_horse', 5),
-  ('wanderritt_mehrtaegig', 'Hufschutz/Ersatzbeschlag', 'per_horse', 6),
-  ('wanderritt_mehrtaegig', 'Pferdepass + Impfnachweis', 'per_horse', 7),
+  ('wanderritt_mehrtaegig', 'Kartenmaterial/Route', 'shared', 3),
+  ('wanderritt_mehrtaegig', 'Bargeld', 'shared', 4),
+  ('wanderritt_mehrtaegig', 'Ladekabel/Powerbank', 'shared', 5),
+  ('wanderritt_mehrtaegig', 'Sattel + Zubehör', 'per_horse', 6),
+  ('wanderritt_mehrtaegig', 'Futter für alle Tage', 'per_horse', 7),
+  ('wanderritt_mehrtaegig', 'Decke/Übernachtungsausrüstung', 'per_horse', 8),
+  ('wanderritt_mehrtaegig', 'Hufschutz/Ersatzbeschlag', 'per_horse', 9),
+  ('wanderritt_mehrtaegig', 'Pferdepass + Impfnachweis', 'per_horse', 10),
+  ('wanderritt_mehrtaegig', 'Putzzeug', 'per_horse', 11),
+  ('wanderritt_mehrtaegig', 'Fliegenspray', 'per_horse', 12),
+  ('wanderritt_mehrtaegig', 'Ersatzhalfter/-strick', 'per_horse', 13),
+  ('wanderritt_mehrtaegig', 'Reithelm', 'per_person', 14),
+  ('wanderritt_mehrtaegig', 'Schlafsack/Isomatte', 'per_person', 15),
+  ('wanderritt_mehrtaegig', 'Wechselkleidung', 'per_person', 16),
+  ('wanderritt_mehrtaegig', 'Erste-Hilfe-Set Mensch', 'per_person', 17),
+  ('wanderritt_mehrtaegig', 'Waschzeug', 'per_person', 18),
+  ('wanderritt_mehrtaegig', 'Sonnencreme', 'per_person', 19),
+  ('wanderritt_mehrtaegig', 'Taschenlampe/Stirnlampe', 'per_person', 20),
   ('urlaub_mit_pferd', 'Pflegeausrüstung', 'shared', 1),
-  ('urlaub_mit_pferd', 'Futter für den Zeitraum', 'per_horse', 2),
-  ('urlaub_mit_pferd', 'Medikamente', 'per_horse', 3),
-  ('urlaub_mit_pferd', 'Pferdepass + Impfnachweis', 'per_horse', 4)
+  ('urlaub_mit_pferd', 'Erste-Hilfe-Set Pferd', 'shared', 2),
+  ('urlaub_mit_pferd', 'Kopien wichtiger Unterlagen', 'shared', 3),
+  ('urlaub_mit_pferd', 'Futter für den Zeitraum', 'per_horse', 4),
+  ('urlaub_mit_pferd', 'Medikamente', 'per_horse', 5),
+  ('urlaub_mit_pferd', 'Pferdepass + Impfnachweis', 'per_horse', 6),
+  ('urlaub_mit_pferd', 'Deckenset', 'per_horse', 7),
+  ('urlaub_mit_pferd', 'Ersatzhalfter/-strick', 'per_horse', 8),
+  ('urlaub_mit_pferd', 'Reithelm', 'per_person', 9),
+  ('urlaub_mit_pferd', 'Reisedokumente', 'per_person', 10),
+  ('urlaub_mit_pferd', 'Wetterfeste Kleidung', 'per_person', 11),
+  ('urlaub_mit_pferd', 'Sonnencreme', 'per_person', 12)
 on conflict (category, item_text) do nothing;
 
 create table if not exists packing_lists (
@@ -504,19 +547,24 @@ create table if not exists packing_lists (
   date date,
   horse_ids uuid[] default '{}',
   people text[] default '{}',
+  event_id uuid references events(id) on delete set null,
   status text not null default 'active', -- active | example
   created_at timestamptz default now()
 );
+alter table packing_lists add column if not exists event_id uuid references events(id) on delete set null;
 
 create table if not exists packing_items (
   id uuid primary key default gen_random_uuid(),
   list_id uuid not null references packing_lists(id) on delete cascade,
   text text not null,
-  scope text not null default 'shared', -- shared | per_horse
+  scope text not null default 'shared', -- shared | per_horse | per_person
   horse_id uuid references horses(id) on delete set null,
+  person_name text,
+  assigned_to text, -- wer bringt diesen Punkt mit (optional, meist bei "Gemeinsam" genutzt)
   done boolean default false,
   created_at timestamptz default now()
 );
+alter table packing_items add column if not exists assigned_to text;
 
 alter table packing_templates enable row level security;
 alter table packing_lists enable row level security;
