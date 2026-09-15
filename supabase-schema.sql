@@ -249,10 +249,12 @@ end $$;
 -- Startbestand: recherchierte Pferdetierärzte und Physio-/Osteopath:innen im Raum 66663 Merzig.
 -- Bitte Angaben (v.a. Telefonnummern bei den Physio-/Osteopath:innen) noch einmal selbst prüfen/ergänzen.
 insert into service_providers (category, name, phone, specialty, notes) values
-  ('tierarzt', 'Mobile Tierarztpraxis Dr. B. Schubert', '06861 938966 (mobil 0171 7742651)', 'Ausschließlich Pferde', 'Fremersdorf, ca. 10–15 km von Merzig'),
-  ('tierarzt', 'Pferdeklinik Altforweiler (Dr. Andreas Rupp)', '06836 919080', 'Pferdeklinik', 'Überherrn'),
+  ('tierarzt', 'Mobile Tierarztpraxis Dr. B. Schubert', '06861 938966 (mobil 0171 7742651)', 'Ausschließlich Pferde', 'Zur Unk 19, Rehlingen-Siersburg (Ortsteil Fremersdorf), ca. 10–15 km von Merzig'),
+  ('tierarzt', 'Pferdeklinik Altforweiler (Dr. Andreas Rupp)', '06836 919080', 'Pferdeklinik, 24h-Notruf', 'Raiffeisenstr. 100, Überherrn – inzwischen fusioniert zu "Pferdeklinik SaarLorLux", Kontaktdaten unverändert'),
   ('tierarzt', 'Tierärztin Groß – Pferdefahrpraxis', '06831 42778', 'Pferde, Fahrpraxis', 'Saarlouis'),
   ('tierarzt', 'Tierärzte Drs. Besse', '06881 2178', 'Kleintier- und Pferdefahrpraxis', 'Lebach'),
+  ('tierarzt', 'Pferdepraxis Dr. Nina Medina', '0176 55320739', 'Pferdezahnheilkunde, Fahrpraxis', 'Wahlener Str. 78, 66679 Losheim'),
+  ('tierarzt', 'Tierarztpraxis Jürgen Pietsch', '06835 68967', 'Groß- und Kleintiere, auch Pferde', 'Am Marienberg 1, 66780 Rehlingen-Siersburg'),
   ('physio_osteo', 'Sabine Seiffarth – Pferdeosteopathie', null, 'Osteopathie', 'Mobil, fährt u.a. Merzig, Saarlouis, Saarbrücken, Neunkirchen, St. Wendel an – Kontakt über Website, Telefonnummer noch ergänzen'),
   ('physio_osteo', 'Zoé Heblich – Pferdephysiotherapie & -osteopathie', null, 'Physiotherapie, Osteopathie', 'Mobil im Saarland – Telefonnummer noch ergänzen'),
   ('physio_osteo', 'Manfred Klein – Pferdeosteopathie Saarland', null, 'Osteopathie', 'Raum Trier/Saarland – Telefonnummer noch ergänzen'),
