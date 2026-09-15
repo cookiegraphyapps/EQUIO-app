@@ -3,6 +3,7 @@ import { ChevronLeft, Syringe, Scissors, Stethoscope, Pill as PillIcon, Dumbbell
 import { supabase, uploadPhoto } from "../supabaseClient";
 import { Card, SectionTitle, Empty, Pill, Modal, IconBtn, COLOR, fmtDate, daysUntil, nextDue, addMonths, addDays, turnoutActiveStage, HEALTH_LABELS, HEALTH_DEFAULT_INTERVAL, HEALTH_INTERVAL_UNIT, inputStyle, labelStyle, btnPrimary, btnGhost, navBtn, todayISO } from "../components/ui";
 import DienstleisterSection from "../components/Dienstleister";
+import PacklisteSection from "../components/Packliste";
 
 const ICONS = { impfung: Syringe, hufschmied: Scissors, zahnarzt: Stethoscope, entwurmung: PillIcon };
 const INTENSITAETEN = ["locker", "normal", "intensiv"];
@@ -106,6 +107,9 @@ export default function Pferde({ user, isAdmin }) {
 
       <div style={{ marginTop: 8 }}>
         <DienstleisterSection user={user} isAdmin={isAdmin} />
+      </div>
+      <div style={{ marginTop: 8 }}>
+        <PacklisteSection user={user} />
       </div>
     </div>
   );

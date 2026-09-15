@@ -242,8 +242,9 @@ create table if not exists service_providers (
 );
 -- Unique-Constraint nachrüsten, falls die Tabelle schon vorher (ohne diese Regel) angelegt wurde.
 do $$ begin
-  alter table service_providers add constraint service_providers_name_key unique (name);
-exception when duplicate_object then null;
+  if not exists (select 1 from pg_constraint where conname = 'service_providers_name_key') then
+    alter table service_providers add constraint service_providers_name_key unique (name);
+  end if;
 end $$;
 
 -- Startbestand: recherchierte Pferdetierärzte und Physio-/Osteopath:innen im Raum 66663 Merzig.
@@ -458,6 +459,74 @@ create policy "training_plans_own" on training_plans for all
   using (auth.uid() = user_id) with check (auth.uid() = user_id);
 create policy "horse_expenses_own" on horse_expenses for all
   using (auth.uid() = user_id) with check (auth.uid() = user_id);
+
+-- Packlisten: Vorlagen (Vorschläge je Anlass) + tatsächliche Listen + Punkte.
+-- Von allen bearbeitbar (kein Admin-Schutz), da gemeinsam gepflegt werden soll.
+create table if not exists packing_templates (
+  id uuid primary key default gen_random_uuid(),
+  category text not null,
+  item_text text not null,
+  scope text not null default 'shared', -- shared | per_horse
+  order_index int not null default 0,
+  created_at timestamptz default now(),
+  unique (category, item_text)
+);
+insert into packing_templates (category, item_text, scope, order_index) values
+  ('umzug', 'Zaunmaterial', 'shared', 1),
+  ('umzug', 'Wassereimer', 'shared', 2),
+  ('umzug', 'Schubkarre/Mistgabel', 'shared', 3),
+  ('umzug', 'Halfter + Strick', 'per_horse', 4),
+  ('umzug', 'Futter', 'per_horse', 5),
+  ('umzug', 'Medikamente', 'per_horse', 6),
+  ('umzug', 'Pferdepass', 'per_horse', 7),
+  ('wanderritt_1tag', 'Erste-Hilfe-Set Pferd', 'shared', 1),
+  ('wanderritt_1tag', 'Hufkratzer', 'shared', 2),
+  ('wanderritt_1tag', 'Sattel + Zubehör', 'per_horse', 3),
+  ('wanderritt_1tag', 'Wasser/Eimer für Pferd', 'per_horse', 4),
+  ('wanderritt_1tag', 'Pferdepass', 'per_horse', 5),
+  ('wanderritt_mehrtaegig', 'Erste-Hilfe-Set Pferd', 'shared', 1),
+  ('wanderritt_mehrtaegig', 'Zelt/Unterkunft-Material', 'shared', 2),
+  ('wanderritt_mehrtaegig', 'Sattel + Zubehör', 'per_horse', 3),
+  ('wanderritt_mehrtaegig', 'Futter für alle Tage', 'per_horse', 4),
+  ('wanderritt_mehrtaegig', 'Decke/Übernachtungsausrüstung', 'per_horse', 5),
+  ('wanderritt_mehrtaegig', 'Hufschutz/Ersatzbeschlag', 'per_horse', 6),
+  ('wanderritt_mehrtaegig', 'Pferdepass + Impfnachweis', 'per_horse', 7),
+  ('urlaub_mit_pferd', 'Pflegeausrüstung', 'shared', 1),
+  ('urlaub_mit_pferd', 'Futter für den Zeitraum', 'per_horse', 2),
+  ('urlaub_mit_pferd', 'Medikamente', 'per_horse', 3),
+  ('urlaub_mit_pferd', 'Pferdepass + Impfnachweis', 'per_horse', 4)
+on conflict (category, item_text) do nothing;
+
+create table if not exists packing_lists (
+  id uuid primary key default gen_random_uuid(),
+  category text not null,
+  title text not null,
+  date date,
+  horse_ids uuid[] default '{}',
+  people text[] default '{}',
+  status text not null default 'active', -- active | example
+  created_at timestamptz default now()
+);
+
+create table if not exists packing_items (
+  id uuid primary key default gen_random_uuid(),
+  list_id uuid not null references packing_lists(id) on delete cascade,
+  text text not null,
+  scope text not null default 'shared', -- shared | per_horse
+  horse_id uuid references horses(id) on delete set null,
+  done boolean default false,
+  created_at timestamptz default now()
+);
+
+alter table packing_templates enable row level security;
+alter table packing_lists enable row level security;
+alter table packing_items enable row level security;
+drop policy if exists "packing_templates_all" on packing_templates;
+drop policy if exists "packing_lists_all" on packing_lists;
+drop policy if exists "packing_items_all" on packing_items;
+create policy "packing_templates_all" on packing_templates for all using (auth.role() = 'authenticated') with check (auth.role() = 'authenticated');
+create policy "packing_lists_all" on packing_lists for all using (auth.role() = 'authenticated') with check (auth.role() = 'authenticated');
+create policy "packing_items_all" on packing_items for all using (auth.role() = 'authenticated') with check (auth.role() = 'authenticated');
 
 -- Eure echten Pferde (Gesundheitsdaten trägst du später direkt in der App ein)
 insert into horses (name, breed, born, owner, note, health) values
