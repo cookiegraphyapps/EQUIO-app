@@ -580,6 +580,33 @@ create policy "packing_items_all" on packing_items for all using (auth.role() = 
 -- Eure echten Pferde (Gesundheitsdaten trägst du später direkt in der App ein)
 insert into horses (name, breed, born, owner, note, health) values
   ('Goldi', null, null, null, null, '{}'),
-  ('Nanni', null, null, null, null, '{}'),
-  ('Karl', null, null, null, null, '{}')
+  ('Nanni', null, null, null, null, '{}')
 on conflict do nothing;
+
+-- Wiederkehrende monatliche Kosten (z.B. Stallmiete, Versicherung) – werden automatisch
+-- einmal pro Kalendermonat als echte Ausgabe (inkl. Aufteilung) angelegt.
+create table if not exists recurring_expenses (
+  id uuid primary key default gen_random_uuid(),
+  description text not null,
+  amount numeric not null,
+  paid_by text not null,
+  horse_id uuid references horses(id) on delete set null,
+  split_by_horse boolean not null default false,
+  horse_splits jsonb default '{}', -- {"horse_id": betrag} – nur wenn split_by_horse = true
+  people text[] not null default '{}',
+  split_mode text not null default 'even', -- even | custom
+  custom_splits jsonb default '{}', -- {"Name": betrag}
+  active boolean not null default true,
+  created_at timestamptz default now()
+);
+alter table recurring_expenses add column if not exists split_by_horse boolean not null default false;
+alter table recurring_expenses add column if not exists horse_splits jsonb default '{}';
+alter table expenses add column if not exists recurring_expense_id uuid references recurring_expenses(id) on delete set null;
+
+alter table recurring_expenses enable row level security;
+drop policy if exists "recurring_expenses_all" on recurring_expenses;
+create policy "recurring_expenses_all" on recurring_expenses for all using (auth.role() = 'authenticated') with check (auth.role() = 'authenticated');
+
+-- Wichtig: zwingt die API (PostgREST), ihren Schema-Cache neu zu laden,
+-- damit neue/geänderte Spalten sofort erkannt werden (sonst manchmal erst nach Verzögerung).
+NOTIFY pgrst, 'reload schema';

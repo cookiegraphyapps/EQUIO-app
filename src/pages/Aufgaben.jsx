@@ -20,11 +20,13 @@ export default function Aufgaben({ user, isAdmin }) {
   const [showManageCategories, setShowManageCategories] = useState(false);
   const [cleanedUp, setCleanedUp] = useState(null); // Liste kürzlich gelöschter alter Aufgaben, zum Anzeigen
 
-  // Aufgaben, die schon 4 Wochen oder länger vorbei sind, endgültig löschen.
+  // Aufgaben, die schon 4 Wochen oder länger vorbei sind, endgültig löschen –
+  // aber nur erledigte. Offene (nicht übernommene/nicht erledigte) Aufgaben bleiben
+  // bestehen, bis sich jemand wirklich drum gekümmert hat.
   const cleanupOldTasks = async () => {
     const cutoff = addDays(todayISO(), -28);
     const { data: expired } = await supabase.from("tasks").select("id, title, date, date_end")
-      .lt("date", cutoff).or(`date_end.is.null,date_end.lt.${cutoff}`);
+      .lt("date", cutoff).or(`date_end.is.null,date_end.lt.${cutoff}`).eq("done", true);
     if (expired && expired.length > 0) {
       await supabase.from("tasks").delete().in("id", expired.map((x) => x.id));
       setCleanedUp(expired);
@@ -52,8 +54,10 @@ export default function Aufgaben({ user, isAdmin }) {
 
   const t = todayISO();
   const byCategory = (x) => categoryFilter === "alle" || (x.category || "allgemein") === categoryFilter;
-  const upcomingAll = tasks.filter((x) => (x.date_end || x.date) >= t && byCategory(x));
-  const past = tasks.filter((x) => (x.date_end || x.date) < t && byCategory(x)).slice(-5);
+  // Nicht erledigte Aufgaben bleiben in "Anstehend", auch wenn ihr Datum schon vorbei ist –
+  // damit nichts untergeht, nur weil der eigentliche Termin verstrichen ist.
+  const upcomingAll = tasks.filter((x) => ((x.date_end || x.date) >= t || !x.done) && byCategory(x));
+  const past = tasks.filter((x) => (x.date_end || x.date) < t && x.done && byCategory(x)).slice(-5);
   // Bei "Alle" werden tägliche Aufgaben separat eingeklappt, damit sie die Übersicht nicht zumüllen
   const separateDaily = categoryFilter === "alle";
   const upcoming = separateDaily ? upcomingAll.filter((x) => (x.category || "allgemein") !== "taeglich") : upcomingAll;
