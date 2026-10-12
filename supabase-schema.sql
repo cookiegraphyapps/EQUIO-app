@@ -618,10 +618,12 @@ create table if not exists standing_orders (
   payee text not null,
   amount numeric not null,
   credit_balance numeric not null default 0,
+  last_applied_month text, -- "YYYY-MM" des Monats, für den der Betrag zuletzt gutgeschrieben wurde
   note text,
   active boolean not null default true,
   created_at timestamptz default now()
 );
+alter table standing_orders add column if not exists last_applied_month text;
 alter table standing_orders enable row level security;
 drop policy if exists "standing_orders_all" on standing_orders;
 create policy "standing_orders_all" on standing_orders for all using (auth.role() = 'authenticated') with check (auth.role() = 'authenticated');

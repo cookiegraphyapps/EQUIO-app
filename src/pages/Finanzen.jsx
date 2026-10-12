@@ -61,13 +61,19 @@ export default function Finanzen({ user, isAdmin }) {
     await splitPeopleForExpense(exp.id, recurring);
   };
 
-  // Verrechnet pro aktivem Dauerauftrag den monatlichen Betrag (+ evtl. vorhandenes Guthaben)
-  // mit den aktuell offenen Posten zwischen Zahler:in und Empfänger:in – älteste zuerst.
-  // Was übrig bleibt, wird als neues Guthaben gespeichert und deckt automatisch spätere offene Posten ab.
+  // Verrechnet pro aktivem Dauerauftrag das vorhandene Guthaben – und den monatlichen Betrag
+  // nur, wenn er für den laufenden Kalendermonat noch nicht gutgeschrieben wurde (sonst würde
+  // bei jedem Laden der Seite erneut Geld "dazukommen") – mit den aktuell offenen Posten zwischen
+  // Zahler:in und Empfänger:in, älteste zuerst. Was übrig bleibt, wird als Guthaben gespeichert.
   const applyStandingOrders = async (orders, currentExpenses) => {
+    const currentMonth = todayISO().slice(0, 7);
     for (const order of orders) {
-      let available = Number(order.amount) + Number(order.credit_balance || 0);
-      if (available <= 0) continue;
+      const isNewMonth = order.last_applied_month !== currentMonth;
+      let available = Number(order.credit_balance || 0) + (isNewMonth ? Number(order.amount) : 0);
+      if (available <= 0) {
+        if (isNewMonth) await supabase.from("standing_orders").update({ last_applied_month: currentMonth }).eq("id", order.id);
+        continue;
+      }
       const openSplits = [];
       currentExpenses.forEach((ex) => {
         (ex.expense_splits || []).forEach((s) => {
@@ -84,8 +90,11 @@ export default function Finanzen({ user, isAdmin }) {
         available -= s.amount;
       }
       if (toSettle.length > 0) await supabase.from("expense_splits").update({ status: "erhalten" }).in("id", toSettle);
-      if (available !== Number(order.credit_balance || 0)) {
-        await supabase.from("standing_orders").update({ credit_balance: available }).eq("id", order.id);
+      if (available !== Number(order.credit_balance || 0) || isNewMonth) {
+        await supabase.from("standing_orders").update({
+          credit_balance: available,
+          ...(isNewMonth ? { last_applied_month: currentMonth } : {}),
+        }).eq("id", order.id);
       }
     }
   };

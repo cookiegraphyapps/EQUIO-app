@@ -106,10 +106,10 @@ export default function Pferde({ user, isAdmin }) {
       )}
 
       <div style={{ marginTop: 8 }}>
-        <DienstleisterSection user={user} isAdmin={isAdmin} />
+        <HeuSection isAdmin={isAdmin} />
       </div>
       <div style={{ marginTop: 8 }}>
-        <HeuSection isAdmin={isAdmin} />
+        <DienstleisterSection user={user} isAdmin={isAdmin} />
       </div>
     </div>
   );
