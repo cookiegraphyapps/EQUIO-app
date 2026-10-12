@@ -13,6 +13,9 @@ export default function Finanzen({ user, isAdmin }) {
   const [confirmDeleteId, setConfirmDeleteId] = useState(null);
   const [confirmDeleteRecurringId, setConfirmDeleteRecurringId] = useState(null);
   const [showPaid, setShowPaid] = useState(false);
+  const [standingOrders, setStandingOrders] = useState([]);
+  const [showNewStanding, setShowNewStanding] = useState(false);
+  const [confirmDeleteStandingId, setConfirmDeleteStandingId] = useState(null);
 
   // Erzeugt die Personen-Aufteilung für eine einzelne Ausgabe (gleichmäßig oder individuell).
   const splitPeopleForExpense = async (expenseId, recurring) => {
@@ -58,28 +61,90 @@ export default function Finanzen({ user, isAdmin }) {
     await splitPeopleForExpense(exp.id, recurring);
   };
 
+  // Verrechnet pro aktivem Dauerauftrag den monatlichen Betrag (+ evtl. vorhandenes Guthaben)
+  // mit den aktuell offenen Posten zwischen Zahler:in und Empfänger:in – älteste zuerst.
+  // Was übrig bleibt, wird als neues Guthaben gespeichert und deckt automatisch spätere offene Posten ab.
+  const applyStandingOrders = async (orders, currentExpenses) => {
+    for (const order of orders) {
+      let available = Number(order.amount) + Number(order.credit_balance || 0);
+      if (available <= 0) continue;
+      const openSplits = [];
+      currentExpenses.forEach((ex) => {
+        (ex.expense_splits || []).forEach((s) => {
+          if (s.status !== "erhalten" && s.user_name === order.payer && ex.paid_by === order.payee) {
+            openSplits.push({ id: s.id, amount: Number(s.amount), date: ex.date });
+          }
+        });
+      });
+      openSplits.sort((a, b) => a.date.localeCompare(b.date));
+      const toSettle = [];
+      for (const s of openSplits) {
+        if (available < s.amount) break;
+        toSettle.push(s.id);
+        available -= s.amount;
+      }
+      if (toSettle.length > 0) await supabase.from("expense_splits").update({ status: "erhalten" }).in("id", toSettle);
+      if (available !== Number(order.credit_balance || 0)) {
+        await supabase.from("standing_orders").update({ credit_balance: available }).eq("id", order.id);
+      }
+    }
+  };
+
   const load = async () => {
-    const [expRes, profRes, horsesRes, recurringRes] = await Promise.all([
+    const [expRes, profRes, horsesRes, recurringRes, standingRes] = await Promise.all([
       supabase.from("expenses").select("*, expense_splits(*)").order("date", { ascending: false }),
       supabase.from("profiles").select("name"),
       supabase.from("horses").select("id, name"),
       supabase.from("recurring_expenses").select("*").order("created_at"),
+      supabase.from("standing_orders").select("*").order("created_at"),
     ]);
     const existingExpenses = expRes.data ?? [];
     const recurring = recurringRes.data ?? [];
+    const standing = standingRes.data ?? [];
     const activeRecurring = recurring.filter((r) => r.active);
+    const activeStanding = standing.filter((s) => s.active);
     if (activeRecurring.length > 0) {
       await Promise.all(activeRecurring.map((r) => generateRecurring(r, existingExpenses)));
+    }
+    if (activeRecurring.length > 0 || activeStanding.length > 0) {
       const { data: refreshed } = await supabase.from("expenses").select("*, expense_splits(*)").order("date", { ascending: false });
-      setExpenses(refreshed ?? existingExpenses);
+      const freshExpenses = refreshed ?? existingExpenses;
+      if (activeStanding.length > 0) {
+        await applyStandingOrders(activeStanding, freshExpenses);
+        const { data: afterStanding } = await supabase.from("expenses").select("*, expense_splits(*)").order("date", { ascending: false });
+        setExpenses(afterStanding ?? freshExpenses);
+        const { data: standingRefreshed } = await supabase.from("standing_orders").select("*").order("created_at");
+        setStandingOrders(standingRefreshed ?? standing);
+      } else {
+        setExpenses(freshExpenses);
+        setStandingOrders(standing);
+      }
     } else {
       setExpenses(existingExpenses);
+      setStandingOrders(standing);
     }
     setPeople((profRes.data ?? []).map((p) => p.name));
     setHorses(horsesRes.data ?? []);
     setRecurringExpenses(recurring);
   };
   useEffect(() => { load(); }, []);
+
+  const addStandingOrder = async (data) => {
+    await supabase.from("standing_orders").insert({
+      payer: data.payer, payee: data.payee, amount: +data.amount, note: data.note || null, active: true,
+    });
+    setShowNewStanding(false);
+    load();
+  };
+  const toggleStandingActive = async (s) => {
+    await supabase.from("standing_orders").update({ active: !s.active }).eq("id", s.id);
+    load();
+  };
+  const deleteStandingOrder = async (id) => {
+    await supabase.from("standing_orders").delete().eq("id", id);
+    setConfirmDeleteStandingId(null);
+    load();
+  };
 
   const addRecurring = async (data) => {
     const horseTotal = data.splitByHorse ? Object.values(data.horseSplits).reduce((a, b) => a + Number(b || 0), 0) : null;
@@ -208,6 +273,44 @@ export default function Finanzen({ user, isAdmin }) {
         </Card>
       ))}
 
+      <SectionTitle right={<IconBtn onClick={() => setShowNewStanding(true)}><Plus size={15} /> Dauerauftrag</IconBtn>}>
+        <Repeat size={15} style={{ marginRight: 5, verticalAlign: -2 }} />Daueraufträge
+      </SectionTitle>
+      <div style={{ fontSize: 11.5, color: COLOR.inkSoft, marginTop: -6, marginBottom: 10 }}>
+        Deckt offene Beträge zwischen zwei Personen automatisch ab – ohne manuelles „Überwiesen" klicken. Zahlst du mehr als gerade offen ist, bleibt der Rest als Guthaben stehen und deckt automatisch den nächsten offenen Betrag mit ab.
+      </div>
+      {standingOrders.length === 0 && <Empty text="Noch keine Daueraufträge." />}
+      {standingOrders.map((s) => (
+        <Card key={s.id} style={{ marginBottom: 8, opacity: s.active ? 1 : 0.55 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <div>
+              <div style={{ fontWeight: 700, fontSize: 13.5, color: COLOR.ink }}>{s.payer} → {s.payee}</div>
+              <div style={{ fontSize: 11.5, color: COLOR.inkSoft }}>
+                {Number(s.amount).toFixed(2)} € monatlich{!s.active && " · pausiert"}
+                {s.note && ` · ${s.note}`}
+              </div>
+              {Number(s.credit_balance) > 0.004 && (
+                <div style={{ fontSize: 12, color: COLOR.erledigt, marginTop: 2 }}>Guthaben: {Number(s.credit_balance).toFixed(2)} € (deckt den nächsten offenen Betrag automatisch mit ab)</div>
+              )}
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <button onClick={() => toggleStandingActive(s)} style={{ background: "none", border: "none", cursor: "pointer", color: COLOR.inkSoft }}>
+                {s.active ? <Pause size={14} /> : <Play size={14} />}
+              </button>
+              {isAdmin && (
+                confirmDeleteStandingId === s.id ? (
+                  <button onClick={() => deleteStandingOrder(s.id)} style={{ background: "none", border: "none", cursor: "pointer", color: COLOR.dringend, fontSize: 11 }}>sicher?</button>
+                ) : (
+                  <button onClick={() => setConfirmDeleteStandingId(s.id)} style={{ background: "none", border: "none", cursor: "pointer", color: COLOR.inkSoft }}>
+                    <Trash2 size={14} />
+                  </button>
+                )
+              )}
+            </div>
+          </div>
+        </Card>
+      ))}
+
       <SectionTitle right={<IconBtn onClick={() => setShowNewRecurring(true)}><Plus size={15} /> Wiederkehrend</IconBtn>}>
         <Repeat size={15} style={{ marginRight: 5, verticalAlign: -2 }} />Wiederkehrende Kosten
       </SectionTitle>
@@ -267,6 +370,7 @@ export default function Finanzen({ user, isAdmin }) {
       )}
       {showNew && <NewExpenseModal people={people} horses={horses} onClose={() => setShowNew(false)} onSave={addExpense} />}
       {showNewRecurring && <NewRecurringExpenseModal people={people} horses={horses} onClose={() => setShowNewRecurring(false)} onSave={addRecurring} />}
+      {showNewStanding && <NewStandingOrderModal people={people} defaultPayer={user} onClose={() => setShowNewStanding(false)} onSave={addStandingOrder} />}
     </div>
   );
 }
@@ -360,6 +464,35 @@ function NewExpenseModal({ people, horses, onClose, onSave }) {
         style={{ ...btnPrimary, width: "100%", padding: "11px 0", opacity: canSave ? 1 : 0.5 }}>
         Ausgabe speichern
       </button>
+    </Modal>
+  );
+}
+
+function NewStandingOrderModal({ people, defaultPayer, onClose, onSave }) {
+  const [payer, setPayer] = useState(defaultPayer || people[0] || "");
+  const [payee, setPayee] = useState(people.find((p) => p !== defaultPayer) || "");
+  const [amount, setAmount] = useState("");
+  const [note, setNote] = useState("");
+  const canSave = payer && payee && payer !== payee && amount;
+  return (
+    <Modal title="Neuer Dauerauftrag" onClose={onClose}>
+      <label style={labelStyle}>Von</label>
+      <select style={inputStyle} value={payer} onChange={(e) => setPayer(e.target.value)}>
+        {people.map((u) => <option key={u}>{u}</option>)}
+      </select>
+      <label style={labelStyle}>An</label>
+      <select style={inputStyle} value={payee} onChange={(e) => setPayee(e.target.value)}>
+        {people.map((u) => <option key={u}>{u}</option>)}
+      </select>
+      <label style={labelStyle}>Betrag monatlich (€)</label>
+      <input type="number" style={inputStyle} value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="z. B. 150" />
+      <label style={labelStyle}>Notiz (optional)</label>
+      <input style={inputStyle} value={note} onChange={(e) => setNote(e.target.value)} placeholder="z. B. deckt Stallmiete + etwas Heu-Vorauszahlung" />
+      <button
+        disabled={!canSave}
+        onClick={() => onSave({ payer, payee, amount, note })}
+        style={{ ...btnPrimary, width: "100%", padding: "11px 0", opacity: canSave ? 1 : 0.5 }}
+      >Speichern</button>
     </Modal>
   );
 }
