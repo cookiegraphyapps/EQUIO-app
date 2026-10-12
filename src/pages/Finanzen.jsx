@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { CheckCircle2, Plus, Repeat, Trash2, Pause, Play } from "lucide-react";
+import { CheckCircle2, Plus, Repeat, Trash2, Pause, Play, ChevronUp, ChevronDown } from "lucide-react";
 import { supabase } from "../supabaseClient";
 import { Card, SectionTitle, Empty, IconBtn, Modal, COLOR, fmtDate, todayISO, inputStyle, labelStyle, btnPrimary, btnGhost } from "../components/ui";
 
@@ -12,6 +12,7 @@ export default function Finanzen({ user, isAdmin }) {
   const [showNewRecurring, setShowNewRecurring] = useState(false);
   const [confirmDeleteId, setConfirmDeleteId] = useState(null);
   const [confirmDeleteRecurringId, setConfirmDeleteRecurringId] = useState(null);
+  const [showPaid, setShowPaid] = useState(false);
 
   // Erzeugt die Personen-Aufteilung für eine einzelne Ausgabe (gleichmäßig oder individuell).
   const splitPeopleForExpense = async (expenseId, recurring) => {
@@ -121,6 +122,7 @@ export default function Finanzen({ user, isAdmin }) {
       : +data.amount;
     const { data: exp, error } = await supabase.from("expenses").insert({
       description: data.desc, amount: total, date: todayISO(), paid_by: data.paidBy, horse_id: data.horseId || null,
+      duration_months: data.durationMonths ? Number(data.durationMonths) : null,
     }).select().single();
     if (error) return;
     let rows;
@@ -139,6 +141,53 @@ export default function Finanzen({ user, isAdmin }) {
 
   const totalOffen = expenses.reduce((s, ex) => s + (ex.expense_splits || []).filter((x) => x.status !== "erhalten" && x.user_name === user).reduce((a, b) => a + Number(b.amount), 0), 0);
 
+  // Alle offenen Beträge zwischen je zwei Personen gegenrechnen, damit am Ende nur
+  // noch ein einziger Betrag pro Personenpaar übrig bleibt (statt vieler Einzelposten).
+  const netBalances = (() => {
+    const debts = {}; // debts[schuldet][an] = betrag
+    expenses.forEach((ex) => {
+      (ex.expense_splits || []).forEach((s) => {
+        if (s.status === "erhalten" || s.user_name === ex.paid_by) return;
+        debts[s.user_name] = debts[s.user_name] || {};
+        debts[s.user_name][ex.paid_by] = (debts[s.user_name][ex.paid_by] || 0) + Number(s.amount);
+      });
+    });
+    const names = new Set();
+    Object.keys(debts).forEach((d) => { names.add(d); Object.keys(debts[d]).forEach((c) => names.add(c)); });
+    const arr = Array.from(names);
+    const pairs = [];
+    for (let i = 0; i < arr.length; i++) {
+      for (let j = i + 1; j < arr.length; j++) {
+        const a = arr[i], b = arr[j];
+        const net = (debts[a]?.[b] || 0) - (debts[b]?.[a] || 0);
+        if (Math.abs(net) > 0.004) {
+          pairs.push(net > 0 ? { debtor: a, creditor: b, amount: net } : { debtor: b, creditor: a, amount: -net });
+        }
+      }
+    }
+    return pairs.sort((x, y) => y.amount - x.amount);
+  })();
+
+  const isExpensePaid = (ex) => (ex.expense_splits || []).length > 0 && (ex.expense_splits || []).every((s) => s.status === "erhalten");
+  const openExpenses = expenses.filter((ex) => !isExpensePaid(ex));
+  const paidExpenses = expenses.filter(isExpensePaid);
+
+  const settlePair = async (debtor, creditor) => {
+    const splitIds = [];
+    expenses.forEach((ex) => {
+      (ex.expense_splits || []).forEach((s) => {
+        if (s.status === "erhalten") return;
+        if ((s.user_name === debtor && ex.paid_by === creditor) || (s.user_name === creditor && ex.paid_by === debtor)) {
+          splitIds.push(s.id);
+        }
+      });
+    });
+    if (splitIds.length > 0) {
+      await supabase.from("expense_splits").update({ status: "erhalten" }).in("id", splitIds);
+      load();
+    }
+  };
+
   return (
     <div>
       <SectionTitle right={<IconBtn onClick={() => setShowNew(true)}><Plus size={15} /> Ausgabe</IconBtn>}>Finanzen</SectionTitle>
@@ -146,6 +195,18 @@ export default function Finanzen({ user, isAdmin }) {
         <div style={{ fontSize: 12, color: COLOR.privat, fontWeight: 600 }}>Deine offenen Anteile</div>
         <div style={{ fontFamily: "Fraunces, serif", fontSize: 24, fontWeight: 700, color: COLOR.ink }}>{totalOffen.toFixed(2)} €</div>
       </Card>
+
+      <SectionTitle>⚖️ Verrechnung</SectionTitle>
+      {netBalances.length === 0 && <Empty text="Alles beglichen." />}
+      {netBalances.map((p) => (
+        <Card key={`${p.debtor}-${p.creditor}`} style={{ marginBottom: 8, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <div style={{ fontSize: 13.5, color: COLOR.ink }}>
+            <strong>{p.debtor}</strong> schuldet <strong>{p.creditor}</strong>
+            <div style={{ fontFamily: "Fraunces, serif", fontSize: 18, fontWeight: 700, marginTop: 2 }}>{p.amount.toFixed(2)} €</div>
+          </div>
+          <button onClick={() => settlePair(p.debtor, p.creditor)} style={btnPrimary}>Als beglichen markieren</button>
+        </Card>
+      ))}
 
       <SectionTitle right={<IconBtn onClick={() => setShowNewRecurring(true)}><Plus size={15} /> Wiederkehrend</IconBtn>}>
         <Repeat size={15} style={{ marginRight: 5, verticalAlign: -2 }} />Wiederkehrende Kosten
@@ -181,49 +242,29 @@ export default function Finanzen({ user, isAdmin }) {
       ))}
 
       <SectionTitle>Ausgaben</SectionTitle>
-      {expenses.map((ex) => (
-        <Card key={ex.id} style={{ marginBottom: 10 }}>
-          <div style={{ display: "flex", justifyContent: "space-between" }}>
-            <div>
-              <div style={{ fontWeight: 700, fontSize: 14, color: COLOR.ink }}>{ex.description}</div>
-              <div style={{ fontSize: 12, color: COLOR.inkSoft }}>
-                bezahlt von {ex.paid_by} · {fmtDate(ex.date)}
-                {ex.horse_id && ` · 🐴 ${horses.find((h) => h.id === ex.horse_id)?.name || ""}`}
-              </div>
-            </div>
-            <div style={{ fontFamily: "Fraunces, serif", fontWeight: 700, fontSize: 16, color: COLOR.ink }}>{Number(ex.amount).toFixed(2)} €</div>
-          </div>
-          <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 6 }}>
-            {(ex.expense_splits || []).map((s) => (
-              <div key={s.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                <span style={{ fontSize: 13, color: COLOR.ink }}>{s.user_name} · {Number(s.amount).toFixed(2)} €</span>
-                {s.status === "erhalten" ? (
-                  <span style={{ background: COLOR.erledigtBg, color: COLOR.erledigt, borderRadius: 999, padding: "3px 10px", fontSize: 12, fontWeight: 600, display: "inline-flex", alignItems: "center", gap: 4 }}><CheckCircle2 size={11} />erhalten</span>
-                ) : ex.paid_by === user ? (
-                  <button onClick={() => setStatus(s.id, "erhalten")} style={btnPrimary}>Als erhalten markieren</button>
-                ) : s.status === "überwiesen" ? (
-                  s.user_name === user
-                    ? <span style={{ background: COLOR.uebernommenBg, color: COLOR.uebernommen, borderRadius: 999, padding: "3px 10px", fontSize: 12, fontWeight: 600 }}>überwiesen</span>
-                    : <span style={{ background: COLOR.dringendBg, color: COLOR.dringend, borderRadius: 999, padding: "3px 10px", fontSize: 12, fontWeight: 600 }}>offen</span>
-                ) : (
-                  s.user_name === user ? <button onClick={() => setStatus(s.id, "überwiesen")} style={btnGhost}>Überwiesen</button>
-                    : <span style={{ background: COLOR.dringendBg, color: COLOR.dringend, borderRadius: 999, padding: "3px 10px", fontSize: 12, fontWeight: 600 }}>offen</span>
-                )}
-              </div>
-            ))}
-          </div>
-          {isAdmin && (
-            confirmDeleteId === ex.id ? (
-              <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
-                <button onClick={() => deleteExpense(ex.id)} style={{ ...btnPrimary, background: COLOR.dringend }}>Wirklich löschen</button>
-                <button onClick={() => setConfirmDeleteId(null)} style={btnGhost}>Abbrechen</button>
-              </div>
-            ) : (
-              <button onClick={() => setConfirmDeleteId(ex.id)} style={{ ...btnGhost, marginTop: 10, color: COLOR.dringend }}>Ausgabe löschen</button>
-            )
-          )}
-        </Card>
+      {openExpenses.length === 0 && <Empty text="Keine offenen Ausgaben." />}
+      {openExpenses.map((ex) => (
+        <ExpenseCard key={ex.id} ex={ex} horses={horses} user={user} isAdmin={isAdmin} onSetStatus={setStatus}
+          confirmDelete={confirmDeleteId === ex.id} onConfirmDelete={() => setConfirmDeleteId(ex.id)}
+          onCancelDelete={() => setConfirmDeleteId(null)} onDelete={() => deleteExpense(ex.id)} />
       ))}
+
+      {paidExpenses.length > 0 && (
+        <>
+          <button onClick={() => setShowPaid((v) => !v)} style={{
+            display: "flex", alignItems: "center", gap: 6, background: "none", border: "none", cursor: "pointer",
+            color: COLOR.inkSoft, fontSize: 13, fontWeight: 600, padding: "10px 0",
+          }}>
+            {showPaid ? <ChevronUp size={15} /> : <ChevronDown size={15} />}
+            ✅ Bezahlt ({paidExpenses.length})
+          </button>
+          {showPaid && paidExpenses.map((ex) => (
+            <ExpenseCard key={ex.id} ex={ex} horses={horses} user={user} isAdmin={isAdmin} onSetStatus={setStatus}
+              confirmDelete={confirmDeleteId === ex.id} onConfirmDelete={() => setConfirmDeleteId(ex.id)}
+              onCancelDelete={() => setConfirmDeleteId(null)} onDelete={() => deleteExpense(ex.id)} />
+          ))}
+        </>
+      )}
       {showNew && <NewExpenseModal people={people} horses={horses} onClose={() => setShowNew(false)} onSave={addExpense} />}
       {showNewRecurring && <NewRecurringExpenseModal people={people} horses={horses} onClose={() => setShowNewRecurring(false)} onSave={addRecurring} />}
     </div>
@@ -238,6 +279,7 @@ function NewExpenseModal({ people, horses, onClose, onSave }) {
   const [mode, setMode] = useState("even"); // even | custom
   const [splits, setSplits] = useState({});
   const [horseId, setHorseId] = useState("");
+  const [durationMonths, setDurationMonths] = useState("");
   const toggle = (u) => setSelected((p) => (p.includes(u) ? p.filter((x) => x !== u) : [...p, u]));
   const setSplitAmount = (u, val) => setSplits((s) => ({ ...s, [u]: val }));
   const modeBtn = { flex: 1, padding: "8px 0", borderRadius: 9, border: `1px solid ${COLOR.line}`, background: "#fff", fontSize: 13, fontWeight: 600, cursor: "pointer" };
@@ -264,6 +306,15 @@ function NewExpenseModal({ people, horses, onClose, onSave }) {
           }}>🐴 {h.name}</button>
         ))}
       </div>
+      {horseId && (
+        <>
+          <label style={labelStyle}>Hält wie viele Monate? (optional, z. B. Mineralfutter: 3)</label>
+          <input type="number" min="1" style={inputStyle} value={durationMonths} onChange={(e) => setDurationMonths(e.target.value)} placeholder="1 = nur dieser Monat" />
+          <div style={{ fontSize: 11.5, color: COLOR.inkSoft, marginTop: -8, marginBottom: 10 }}>
+            Wird dann beim Pferd auf die Monate verteilt angezeigt (Gesamtbetrag ÷ Monate).
+          </div>
+        </>
+      )}
       <label style={labelStyle}>Bezahlt von</label>
       <select style={inputStyle} value={paidBy} onChange={(e) => setPaidBy(e.target.value)}>
         {people.map((u) => <option key={u}>{u}</option>)}
@@ -305,11 +356,58 @@ function NewExpenseModal({ people, horses, onClose, onSave }) {
           </div>
         </>
       )}
-      <button disabled={!canSave} onClick={() => onSave({ desc: desc.trim(), amount, paidBy, people: selected, mode, splits, horseId })}
+      <button disabled={!canSave} onClick={() => onSave({ desc: desc.trim(), amount, paidBy, people: selected, mode, splits, horseId, durationMonths })}
         style={{ ...btnPrimary, width: "100%", padding: "11px 0", opacity: canSave ? 1 : 0.5 }}>
         Ausgabe speichern
       </button>
     </Modal>
+  );
+}
+
+function ExpenseCard({ ex, horses, user, isAdmin, onSetStatus, confirmDelete, onConfirmDelete, onCancelDelete, onDelete }) {
+  return (
+    <Card style={{ marginBottom: 10 }}>
+      <div style={{ display: "flex", justifyContent: "space-between" }}>
+        <div>
+          <div style={{ fontWeight: 700, fontSize: 14, color: COLOR.ink }}>{ex.description}</div>
+          <div style={{ fontSize: 12, color: COLOR.inkSoft }}>
+            bezahlt von {ex.paid_by} · {fmtDate(ex.date)}
+            {ex.horse_id && ` · 🐴 ${horses.find((h) => h.id === ex.horse_id)?.name || ""}`}
+            {ex.duration_months > 1 && ` · hält ${ex.duration_months} Mon.`}
+          </div>
+        </div>
+        <div style={{ fontFamily: "Fraunces, serif", fontWeight: 700, fontSize: 16, color: COLOR.ink }}>{Number(ex.amount).toFixed(2)} €</div>
+      </div>
+      <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 6 }}>
+        {(ex.expense_splits || []).map((s) => (
+          <div key={s.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <span style={{ fontSize: 13, color: COLOR.ink }}>{s.user_name} · {Number(s.amount).toFixed(2)} €</span>
+            {s.status === "erhalten" ? (
+              <span style={{ background: COLOR.erledigtBg, color: COLOR.erledigt, borderRadius: 999, padding: "3px 10px", fontSize: 12, fontWeight: 600, display: "inline-flex", alignItems: "center", gap: 4 }}><CheckCircle2 size={11} />erhalten</span>
+            ) : ex.paid_by === user ? (
+              <button onClick={() => onSetStatus(s.id, "erhalten")} style={btnPrimary}>Als erhalten markieren</button>
+            ) : s.status === "überwiesen" ? (
+              s.user_name === user
+                ? <span style={{ background: COLOR.uebernommenBg, color: COLOR.uebernommen, borderRadius: 999, padding: "3px 10px", fontSize: 12, fontWeight: 600 }}>überwiesen</span>
+                : <span style={{ background: COLOR.dringendBg, color: COLOR.dringend, borderRadius: 999, padding: "3px 10px", fontSize: 12, fontWeight: 600 }}>offen</span>
+            ) : (
+              s.user_name === user ? <button onClick={() => onSetStatus(s.id, "überwiesen")} style={btnGhost}>Überwiesen</button>
+                : <span style={{ background: COLOR.dringendBg, color: COLOR.dringend, borderRadius: 999, padding: "3px 10px", fontSize: 12, fontWeight: 600 }}>offen</span>
+            )}
+          </div>
+        ))}
+      </div>
+      {isAdmin && (
+        confirmDelete ? (
+          <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+            <button onClick={onDelete} style={{ ...btnPrimary, background: COLOR.dringend }}>Wirklich löschen</button>
+            <button onClick={onCancelDelete} style={btnGhost}>Abbrechen</button>
+          </div>
+        ) : (
+          <button onClick={onConfirmDelete} style={{ ...btnGhost, marginTop: 10, color: COLOR.dringend }}>Ausgabe löschen</button>
+        )
+      )}
+    </Card>
   );
 }
 

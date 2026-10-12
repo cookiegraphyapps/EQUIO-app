@@ -3,6 +3,7 @@ import { ChevronLeft, Syringe, Scissors, Stethoscope, Pill as PillIcon, Dumbbell
 import { supabase, uploadPhoto } from "../supabaseClient";
 import { Card, SectionTitle, Empty, Pill, Modal, IconBtn, COLOR, fmtDate, daysUntil, nextDue, addMonths, addDays, turnoutActiveStage, HEALTH_LABELS, HEALTH_DEFAULT_INTERVAL, HEALTH_INTERVAL_UNIT, inputStyle, labelStyle, btnPrimary, btnGhost, navBtn, todayISO } from "../components/ui";
 import DienstleisterSection from "../components/Dienstleister";
+import HeuSection from "../components/Heu";
 
 const ICONS = { impfung: Syringe, hufschmied: Scissors, zahnarzt: Stethoscope, entwurmung: PillIcon };
 const INTENSITAETEN = ["locker", "normal", "intensiv"];
@@ -106,6 +107,9 @@ export default function Pferde({ user, isAdmin }) {
 
       <div style={{ marginTop: 8 }}>
         <DienstleisterSection user={user} isAdmin={isAdmin} />
+      </div>
+      <div style={{ marginTop: 8 }}>
+        <HeuSection isAdmin={isAdmin} />
       </div>
     </div>
   );
@@ -633,13 +637,35 @@ function PferdDetail({ horse, user, isAdmin, onBack, onSave, onDelete }) {
       <SectionTitle>
         <Wallet size={15} style={{ marginRight: 5, verticalAlign: -2 }} />Gemeinsame Ausgaben für {horse.name}
       </SectionTitle>
+      {sharedExpenses.length > 0 && (() => {
+        const currentMonthKey = todayISO().slice(0, 7);
+        const monthlyCost = sharedExpenses.reduce((sum, ex) => {
+          const duration = ex.duration_months && ex.duration_months > 1 ? ex.duration_months : 1;
+          const [sy, sm] = ex.date.slice(0, 7).split("-").map(Number);
+          for (let i = 0; i < duration; i++) {
+            const m = ((sm - 1 + i) % 12) + 1;
+            const y = sy + Math.floor((sm - 1 + i) / 12);
+            if (`${y}-${String(m).padStart(2, "0")}` === currentMonthKey) return sum + Number(ex.amount) / duration;
+          }
+          return sum;
+        }, 0);
+        return monthlyCost > 0 ? (
+          <Card style={{ marginBottom: 10, background: "#F3ECDD" }}>
+            <div style={{ fontSize: 12, color: COLOR.inkSoft }}>Kosten diesen Monat (anteilig verteilt)</div>
+            <div style={{ fontFamily: "Fraunces, serif", fontSize: 18, fontWeight: 700, color: COLOR.ink }}>{monthlyCost.toFixed(2)} €</div>
+          </Card>
+        ) : null;
+      })()}
       {sharedExpenses.length === 0 && <Empty text="Noch keine Ausgaben für dieses Pferd." />}
       {sharedExpenses.map((ex) => (
         <Card key={ex.id} style={{ marginBottom: 8 }}>
           <div style={{ display: "flex", justifyContent: "space-between" }}>
             <div>
               <div style={{ fontSize: 13.5, fontWeight: 600, color: COLOR.ink }}>{ex.description}</div>
-              <div style={{ fontSize: 11.5, color: COLOR.inkSoft }}>bezahlt von {ex.paid_by} · {fmtDate(ex.date)}</div>
+              <div style={{ fontSize: 11.5, color: COLOR.inkSoft }}>
+                bezahlt von {ex.paid_by} · {fmtDate(ex.date)}
+                {ex.duration_months > 1 && ` · hält ${ex.duration_months} Mon.`}
+              </div>
             </div>
             <div style={{ fontFamily: "Fraunces, serif", fontWeight: 700, fontSize: 14, color: COLOR.ink }}>{Number(ex.amount).toFixed(2)} €</div>
           </div>

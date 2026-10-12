@@ -284,6 +284,8 @@ update tasks set assigned_users = array[assigned_user]
 
 -- Ausgabe einem Pferd zuordnen (statt nur allgemeine Stallausgabe)
 alter table expenses add column if not exists horse_id uuid references horses(id);
+-- Zeitraum in Monaten, über den sich eine Anschaffung verteilt (z.B. Mineralfutter hält 3 Monate -> Betrag/3 pro Monat)
+alter table expenses add column if not exists duration_months int;
 
 -- Fotos: Profilbild pro Pferd + Foto bei Gesundheitsnotiz
 alter table horses add column if not exists photo_url text;
@@ -606,6 +608,21 @@ alter table expenses add column if not exists recurring_expense_id uuid referenc
 alter table recurring_expenses enable row level security;
 drop policy if exists "recurring_expenses_all" on recurring_expenses;
 create policy "recurring_expenses_all" on recurring_expenses for all using (auth.role() = 'authenticated') with check (auth.role() = 'authenticated');
+
+-- Heu-Verbrauch: Ballenanzahl + Zeitraum (wie lange gehalten) + beteiligte Pferde,
+-- damit sich der Verbrauch für Winter- (Sep-Apr) und Sommermonate hochrechnen lässt.
+create table if not exists hay_batches (
+  id uuid primary key default gen_random_uuid(),
+  date_bought date not null,
+  bale_count int not null,
+  horse_ids uuid[] not null default '{}',
+  date_ran_out date, -- wird nachträglich eingetragen, sobald der Ballen aufgebraucht ist
+  note text,
+  created_at timestamptz default now()
+);
+alter table hay_batches enable row level security;
+drop policy if exists "hay_batches_all" on hay_batches;
+create policy "hay_batches_all" on hay_batches for all using (auth.role() = 'authenticated') with check (auth.role() = 'authenticated');
 
 -- Wichtig: zwingt die API (PostgREST), ihren Schema-Cache neu zu laden,
 -- damit neue/geänderte Spalten sofort erkannt werden (sonst manchmal erst nach Verzögerung).
