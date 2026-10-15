@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react";
-import { AlertTriangle, CheckCircle2, Trash2, Camera } from "lucide-react";
+import { useNavigate } from "react-router-dom";
+import { AlertTriangle, CheckCircle2, Trash2, Camera, Compass } from "lucide-react";
 import { supabase, uploadPhoto } from "../supabaseClient";
-import { Card, SectionTitle, Empty, Pill, COLOR, todayISO, addDays, fmtDate, daysUntil, nextDue, dateToISO, turnoutActiveStage, HEALTH_LABELS, inputStyle, btnPrimary } from "../components/ui";
+import { Card, SectionTitle, Empty, Pill, COLOR, todayISO, addDays, fmtDate, daysUntil, nextDue, dateToISO, turnoutActiveStage, HEALTH_LABELS, inputStyle, btnPrimary, btnGhost } from "../components/ui";
 
 function relativeDay(timestamp) {
   const diff = daysUntil(dateToISO(new Date(timestamp))) * -1; // Tage in der Vergangenheit, positiv
@@ -18,6 +19,7 @@ function storagePathFromUrl(url) {
 }
 
 export default function Dashboard({ user }) {
+  const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
   const [tasks, setTasks] = useState([]);
   const [events, setEvents] = useState([]);
@@ -168,6 +170,10 @@ export default function Dashboard({ user }) {
 
   return (
     <div>
+      <button onClick={() => navigate("/orga")} style={{ ...btnGhost, display: "flex", alignItems: "center", gap: 6, marginBottom: 14 }}>
+        <Compass size={14} /> Orga (Anweideplan, Dienstleister, Heu)
+      </button>
+
       <SectionTitle>📢 Neuigkeiten</SectionTitle>
       <Card style={{ marginBottom: 10 }}>
         <div style={{ display: "flex", gap: 8 }}>

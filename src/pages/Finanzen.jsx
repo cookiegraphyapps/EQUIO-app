@@ -74,10 +74,16 @@ export default function Finanzen({ user, isAdmin }) {
         if (isNewMonth) await supabase.from("standing_orders").update({ last_applied_month: currentMonth }).eq("id", order.id);
         continue;
       }
+      // Beide Richtungen sammeln: was Zahler:in Empfänger:in schuldet, aber auch was
+      // Empfänger:in umgekehrt Zahler:in schuldet – letzteres wird mit abgedeckt,
+      // statt als eigener offener Posten stehen zu bleiben.
       const openSplits = [];
       currentExpenses.forEach((ex) => {
         (ex.expense_splits || []).forEach((s) => {
-          if (s.status !== "erhalten" && s.user_name === order.payer && ex.paid_by === order.payee) {
+          if (s.status === "erhalten") return;
+          if (s.user_name === order.payer && ex.paid_by === order.payee) {
+            openSplits.push({ id: s.id, amount: Number(s.amount), date: ex.date });
+          } else if (s.user_name === order.payee && ex.paid_by === order.payer) {
             openSplits.push({ id: s.id, amount: Number(s.amount), date: ex.date });
           }
         });

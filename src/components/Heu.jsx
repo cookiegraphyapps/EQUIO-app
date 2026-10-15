@@ -25,7 +25,8 @@ export default function HeuSection({ isAdmin }) {
 
   const addBatch = async (data) => {
     await supabase.from("hay_batches").insert({
-      date_bought: data.dateBought, bale_count: Number(data.baleCount), horse_ids: data.horseIds, note: data.note || null,
+      date_bought: data.dateBought, bale_count: Number(data.baleCount), horse_ids: data.horseIds,
+      total_cost: data.totalCost ? Number(data.totalCost) : null, note: data.note || null,
     });
     setShowNew(false);
     load();
@@ -103,7 +104,7 @@ export default function HeuSection({ isAdmin }) {
           <Card key={b.id} style={{ marginBottom: 8 }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
               <div>
-                <div style={{ fontWeight: 700, fontSize: 14, color: COLOR.ink }}>{b.bale_count} Heuballen</div>
+                <div style={{ fontWeight: 700, fontSize: 14, color: COLOR.ink }}>{b.bale_count} Heuballen{b.total_cost && ` · ${Number(b.total_cost).toFixed(2)} €`}</div>
                 <div style={{ fontSize: 11.5, color: COLOR.inkSoft, marginTop: 2 }}>
                   gekauft {fmtDate(b.date_bought)} · {(b.horse_ids || []).length} Pferd{(b.horse_ids || []).length === 1 ? "" : "e"}
                   {(b.horse_ids || []).length > 0 && `: ${b.horse_ids.map((id) => horseNames[id] || "?").join(", ")}`}
@@ -160,6 +161,7 @@ function CloseBatchForm({ onSave, onCancel }) {
 function NewBatchModal({ horses, onClose, onSave }) {
   const [dateBought, setDateBought] = useState(todayISO());
   const [baleCount, setBaleCount] = useState("");
+  const [totalCost, setTotalCost] = useState("");
   const [horseIds, setHorseIds] = useState([]);
   const [note, setNote] = useState("");
   const toggleHorse = (id) => setHorseIds((h) => (h.includes(id) ? h.filter((x) => x !== id) : [...h, id]));
@@ -169,6 +171,11 @@ function NewBatchModal({ horses, onClose, onSave }) {
       <input type="date" style={inputStyle} value={dateBought} onChange={(e) => setDateBought(e.target.value)} />
       <label style={labelStyle}>Anzahl Heuballen</label>
       <input type="number" style={inputStyle} value={baleCount} onChange={(e) => setBaleCount(e.target.value)} placeholder="z. B. 20" />
+      <label style={labelStyle}>Gesamtpreis (€, optional)</label>
+      <input type="number" style={inputStyle} value={totalCost} onChange={(e) => setTotalCost(e.target.value)} placeholder="z. B. 180" />
+      <div style={{ fontSize: 11.5, color: COLOR.inkSoft, marginTop: -8, marginBottom: 10 }}>
+        Wird, sobald du „Als aufgebraucht markieren" einträgst, auf die Tage/Monate verteilt und bei den beteiligten Pferden als Kosten angezeigt.
+      </div>
       <label style={labelStyle}>Welche Pferde fressen davon?</label>
       <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 12 }}>
         {horses.map((h) => (
@@ -182,7 +189,7 @@ function NewBatchModal({ horses, onClose, onSave }) {
       <input style={inputStyle} value={note} onChange={(e) => setNote(e.target.value)} />
       <button
         disabled={!baleCount || horseIds.length === 0}
-        onClick={() => onSave({ dateBought, baleCount, horseIds, note })}
+        onClick={() => onSave({ dateBought, baleCount, totalCost, horseIds, note })}
         style={{ ...btnPrimary, width: "100%", padding: "11px 0", opacity: (!baleCount || horseIds.length === 0) ? 0.5 : 1 }}
       >Speichern</button>
     </Modal>

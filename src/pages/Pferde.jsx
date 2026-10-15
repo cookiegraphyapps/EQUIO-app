@@ -1,9 +1,7 @@
 import { useEffect, useRef, useState } from "react";
-import { ChevronLeft, Syringe, Scissors, Stethoscope, Pill as PillIcon, Dumbbell, Plus, HeartPulse, Wheat, Pencil, Camera, X, Scale, Wallet, Sprout, ChevronUp, ChevronDown } from "lucide-react";
+import { ChevronLeft, Syringe, Scissors, Stethoscope, Pill as PillIcon, Dumbbell, Plus, HeartPulse, Wheat, Pencil, Camera, X, Scale, Wallet } from "lucide-react";
 import { supabase, uploadPhoto } from "../supabaseClient";
-import { Card, SectionTitle, Empty, Pill, Modal, IconBtn, COLOR, fmtDate, daysUntil, nextDue, addMonths, addDays, turnoutActiveStage, HEALTH_LABELS, HEALTH_DEFAULT_INTERVAL, HEALTH_INTERVAL_UNIT, inputStyle, labelStyle, btnPrimary, btnGhost, navBtn, todayISO } from "../components/ui";
-import DienstleisterSection from "../components/Dienstleister";
-import HeuSection from "../components/Heu";
+import { Card, SectionTitle, Empty, Pill, Modal, IconBtn, COLOR, fmtDate, daysUntil, nextDue, addMonths, addDays, dateToISO, parseISODate, HEALTH_LABELS, HEALTH_DEFAULT_INTERVAL, HEALTH_INTERVAL_UNIT, inputStyle, labelStyle, btnPrimary, btnGhost, navBtn, todayISO } from "../components/ui";
 
 const ICONS = { impfung: Syringe, hufschmied: Scissors, zahnarzt: Stethoscope, entwurmung: PillIcon };
 const INTENSITAETEN = ["locker", "normal", "intensiv"];
@@ -14,24 +12,11 @@ export default function Pferde({ user, isAdmin }) {
   const [open, setOpen] = useState(null);
   const [showAddHorse, setShowAddHorse] = useState(false);
   const [addHorseError, setAddHorseError] = useState("");
-  const [turnoutStages, setTurnoutStages] = useState([]);
-  const [turnoutStart, setTurnoutStart] = useState(null);
-  const [showTurnoutEdit, setShowTurnoutEdit] = useState(false);
-
-  const loadTurnout = async () => {
-    const [stagesRes, settingsRes] = await Promise.all([
-      supabase.from("turnout_plan_stages").select("*").order("order_index"),
-      supabase.from("turnout_plan_settings").select("*").eq("id", 1).maybeSingle(),
-    ]);
-    setTurnoutStages(stagesRes.data ?? []);
-    setTurnoutStart(settingsRes.data?.start_date ?? null);
-  };
 
   const load = async () => {
     const { data } = await supabase.from("horses").select("*").order("name");
     setHorses(data ?? []);
     setLoading(false);
-    loadTurnout();
   };
   useEffect(() => { load(); }, []);
 
@@ -74,7 +59,6 @@ export default function Pferde({ user, isAdmin }) {
 
   return (
     <div>
-      <TurnoutPlanCard stages={turnoutStages} startDate={turnoutStart} isAdmin={isAdmin} onEdit={() => setShowTurnoutEdit(true)} />
       <SectionTitle right={<IconBtn onClick={() => setShowAddHorse(true)}><Plus size={15} /> Pferd</IconBtn>}>Pferde</SectionTitle>
       {horses.map((h) => {
         const urgent = Object.entries(h.health || {}).filter(([k]) => HEALTH_LABELS[k]).map(([, v]) => nextDue(v)).filter(Boolean).map((due) => daysUntil(due)).sort((a, b) => a - b)[0];
@@ -96,131 +80,7 @@ export default function Pferde({ user, isAdmin }) {
         );
       })}
       {showAddHorse && <AddHorseModal error={addHorseError} onClose={() => setShowAddHorse(false)} onSave={addHorse} />}
-      {showTurnoutEdit && (
-        <TurnoutPlanEditModal
-          stages={turnoutStages}
-          startDate={turnoutStart}
-          onClose={() => setShowTurnoutEdit(false)}
-          onSaved={loadTurnout}
-        />
-      )}
-
-      <div style={{ marginTop: 8 }}>
-        <HeuSection isAdmin={isAdmin} />
-      </div>
-      <div style={{ marginTop: 8 }}>
-        <DienstleisterSection user={user} isAdmin={isAdmin} />
-      </div>
     </div>
-  );
-}
-
-function TurnoutPlanCard({ stages, startDate, isAdmin, onEdit }) {
-  const active = turnoutActiveStage(stages, startDate);
-  return (
-    <Card style={{ marginBottom: 16, background: "#F3ECDD" }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-        <div>
-          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-            <Sprout size={15} color={COLOR.accent} />
-            <span style={{ fontSize: 13, fontWeight: 700, color: COLOR.ink }}>Anweideplan Frühjahr</span>
-          </div>
-          {!startDate && <div style={{ fontSize: 12.5, color: COLOR.inkSoft, marginTop: 4 }}>Noch kein Start festgelegt.</div>}
-          {startDate && !active && daysUntil(startDate) > 0 && (
-            <div style={{ fontSize: 12.5, color: COLOR.inkSoft, marginTop: 4 }}>Start am {fmtDate(startDate)}.</div>
-          )}
-          {startDate && !active && daysUntil(startDate) <= 0 && (
-            <div style={{ fontSize: 12.5, color: COLOR.inkSoft, marginTop: 4 }}>Plan abgeschlossen.</div>
-          )}
-          {active && (
-            <div style={{ fontSize: 13.5, color: COLOR.ink, marginTop: 4 }}>
-              Heute: <strong>{active.stage.label}</strong> <span style={{ color: COLOR.inkSoft }}>(Tag {active.dayInStage} von {active.stage.days} in dieser Stufe)</span>
-            </div>
-          )}
-        </div>
-        {isAdmin && (
-          <button onClick={onEdit} style={{ background: "none", border: "none", cursor: "pointer", color: COLOR.inkSoft }}>
-            <Pencil size={14} />
-          </button>
-        )}
-      </div>
-    </Card>
-  );
-}
-
-function TurnoutPlanEditModal({ stages, startDate, onClose, onSaved }) {
-  const [localStages, setLocalStages] = useState(stages.map((s) => ({ ...s })));
-  const [start, setStart] = useState(startDate || todayISO());
-  const [newLabel, setNewLabel] = useState("");
-  const [newDays, setNewDays] = useState(7);
-  const [saving, setSaving] = useState(false);
-
-  const move = (i, dir) => {
-    const arr = [...localStages];
-    const j = i + dir;
-    if (j < 0 || j >= arr.length) return;
-    [arr[i], arr[j]] = [arr[j], arr[i]];
-    setLocalStages(arr);
-  };
-  const updateStage = (i, field, val) => {
-    const arr = [...localStages];
-    arr[i] = { ...arr[i], [field]: val };
-    setLocalStages(arr);
-  };
-  const removeStage = (i) => setLocalStages(localStages.filter((_, idx) => idx !== i));
-  const addStage = () => {
-    if (!newLabel.trim()) return;
-    setLocalStages([...localStages, { id: `new-${Date.now()}`, label: newLabel.trim(), days: Number(newDays) || 7 }]);
-    setNewLabel("");
-    setNewDays(7);
-  };
-
-  const save = async () => {
-    setSaving(true);
-    await supabase.from("turnout_plan_settings").update({ start_date: start || null }).eq("id", 1);
-    const existingIds = stages.map((s) => s.id);
-    const newIds = localStages.filter((s) => existingIds.includes(s.id)).map((s) => s.id);
-    const toDelete = existingIds.filter((id) => !newIds.includes(id));
-    if (toDelete.length > 0) await supabase.from("turnout_plan_stages").delete().in("id", toDelete);
-    for (let i = 0; i < localStages.length; i++) {
-      const s = localStages[i];
-      if (String(s.id).startsWith("new-")) {
-        await supabase.from("turnout_plan_stages").insert({ order_index: i, label: s.label, days: Number(s.days) });
-      } else {
-        await supabase.from("turnout_plan_stages").update({ order_index: i, label: s.label, days: Number(s.days) }).eq("id", s.id);
-      }
-    }
-    setSaving(false);
-    onSaved();
-    onClose();
-  };
-
-  return (
-    <Modal title="Anweideplan bearbeiten" onClose={onClose}>
-      <label style={labelStyle}>Gemeinsamer Start (für alle Pferde)</label>
-      <input type="date" style={inputStyle} value={start} onChange={(e) => setStart(e.target.value)} />
-
-      <label style={labelStyle}>Stufen (in Reihenfolge)</label>
-      {localStages.map((s, i) => (
-        <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6 }}>
-          <div style={{ display: "flex", flexDirection: "column" }}>
-            <button onClick={() => move(i, -1)} disabled={i === 0} style={{ background: "none", border: "none", cursor: i === 0 ? "default" : "pointer", opacity: i === 0 ? 0.3 : 1, padding: 0 }}><ChevronUp size={14} /></button>
-            <button onClick={() => move(i, 1)} disabled={i === localStages.length - 1} style={{ background: "none", border: "none", cursor: i === localStages.length - 1 ? "default" : "pointer", opacity: i === localStages.length - 1 ? 0.3 : 1, padding: 0 }}><ChevronDown size={14} /></button>
-          </div>
-          <input style={{ ...inputStyle, marginBottom: 0, flex: 2 }} value={s.label} onChange={(e) => updateStage(i, "label", e.target.value)} />
-          <input type="number" style={{ ...inputStyle, marginBottom: 0, width: 62 }} value={s.days} onChange={(e) => updateStage(i, "days", e.target.value)} />
-          <span style={{ fontSize: 11.5, color: COLOR.inkSoft, width: 30 }}>Tage</span>
-          <button onClick={() => removeStage(i)} style={{ background: "none", border: "none", cursor: "pointer", color: COLOR.dringend }}><X size={15} /></button>
-        </div>
-      ))}
-      <div style={{ display: "flex", gap: 6, marginTop: 10, marginBottom: 16 }}>
-        <input style={{ ...inputStyle, marginBottom: 0, flex: 2 }} value={newLabel} onChange={(e) => setNewLabel(e.target.value)} placeholder="z. B. 15 Minuten" />
-        <input type="number" style={{ ...inputStyle, marginBottom: 0, width: 62 }} value={newDays} onChange={(e) => setNewDays(e.target.value)} />
-        <button onClick={addStage} style={btnGhost}>+</button>
-      </div>
-
-      <button onClick={save} disabled={saving} style={{ ...btnPrimary, width: "100%", padding: "11px 0" }}>Speichern</button>
-    </Modal>
   );
 }
 
@@ -277,6 +137,11 @@ function PferdDetail({ horse, user, isAdmin, onBack, onSave, onDelete }) {
   const [privateExpenses, setPrivateExpenses] = useState([]);
   const [showNewExpense, setShowNewExpense] = useState(false);
   const [confirmDeleteExpId, setConfirmDeleteExpId] = useState(null);
+  const [generalExpenses, setGeneralExpenses] = useState([]);
+  const [horseCount, setHorseCount] = useState(1);
+  const [hayBatches, setHayBatches] = useState([]);
+  const [people, setPeople] = useState([]);
+  const [showNewHorseRecurring, setShowNewHorseRecurring] = useState(false);
   const [feedPlan, setFeedPlan] = useState(horse.feed_plan || "");
   const [editingFeedPlan, setEditingFeedPlan] = useState(false);
   const [savingFeedPlan, setSavingFeedPlan] = useState(false);
@@ -365,12 +230,34 @@ function PferdDetail({ horse, user, isAdmin, onBack, onSave, onDelete }) {
     const { data } = await supabase.from("horse_expenses").select("*").eq("horse_id", horse.id).eq("user_id", currentUid).order("date", { ascending: false });
     setPrivateExpenses(data ?? []);
   };
+  // Für die Monatsübersicht: allgemeine Stallausgaben (kein bestimmtes Pferd) + Gesamtzahl
+  // der Pferde (um den Anteil zu berechnen) + Heuballen, an denen dieses Pferd beteiligt ist.
+  const loadCostContext = async () => {
+    const [generalRes, horsesCountRes, hayRes, peopleRes] = await Promise.all([
+      supabase.from("expenses").select("*").is("horse_id", null),
+      supabase.from("horses").select("id", { count: "exact", head: true }),
+      supabase.from("hay_batches").select("*").contains("horse_ids", [horse.id]),
+      supabase.from("profiles").select("name"),
+    ]);
+    setGeneralExpenses(generalRes.data ?? []);
+    setHorseCount(horsesCountRes.count || 1);
+    setHayBatches(hayRes.data ?? []);
+    setPeople((peopleRes.data ?? []).map((p) => p.name));
+  };
+  const addHorseRecurring = async (data) => {
+    await supabase.from("recurring_expenses").insert({
+      description: data.desc, amount: +data.amount, paid_by: data.paidBy, horse_id: horse.id,
+      people: data.people, split_mode: "even", active: true,
+    });
+    setShowNewHorseRecurring(false);
+  };
   useEffect(() => {
     loadTrainings();
     loadHealthNotes();
     loadMedications();
     loadWeights();
     loadSharedExpenses();
+    loadCostContext();
     supabase.auth.getUser().then(({ data }) => {
       const currentUid = data?.user?.id;
       setUid(currentUid);
@@ -634,25 +521,49 @@ function PferdDetail({ horse, user, isAdmin, onBack, onSave, onDelete }) {
         </Card>
       ))}
 
-      <SectionTitle>
+      <SectionTitle right={<IconBtn onClick={() => setShowNewHorseRecurring(true)}><Plus size={15} /> Wiederkehrend</IconBtn>}>
         <Wallet size={15} style={{ marginRight: 5, verticalAlign: -2 }} />Gemeinsame Ausgaben für {horse.name}
       </SectionTitle>
-      {sharedExpenses.length > 0 && (() => {
+      {(() => {
         const currentMonthKey = todayISO().slice(0, 7);
-        const monthlyCost = sharedExpenses.reduce((sum, ex) => {
+        // Apportioniert eine Ausgabe (mit optionalem Zeitraum in Monaten) auf den aktuellen Monat.
+        const monthShareOf = (ex) => {
           const duration = ex.duration_months && ex.duration_months > 1 ? ex.duration_months : 1;
           const [sy, sm] = ex.date.slice(0, 7).split("-").map(Number);
           for (let i = 0; i < duration; i++) {
             const m = ((sm - 1 + i) % 12) + 1;
             const y = sy + Math.floor((sm - 1 + i) / 12);
-            if (`${y}-${String(m).padStart(2, "0")}` === currentMonthKey) return sum + Number(ex.amount) / duration;
+            if (`${y}-${String(m).padStart(2, "0")}` === currentMonthKey) return Number(ex.amount) / duration;
           }
-          return sum;
+          return 0;
+        };
+        const ownCost = sharedExpenses.reduce((sum, ex) => sum + monthShareOf(ex), 0);
+        const generalShare = generalExpenses.reduce((sum, ex) => sum + monthShareOf(ex) / horseCount, 0);
+        // Heukosten: bei abgeschlossenen (aufgebrauchten) Ballen den auf diesen Monat
+        // entfallenden Anteil des Gesamtpreises, geteilt durch die beteiligten Pferde.
+        const hayCost = hayBatches.reduce((sum, b) => {
+          if (!b.total_cost || !b.date_ran_out) return sum;
+          const start = parseISODate(b.date_bought), end = parseISODate(b.date_ran_out);
+          const totalDays = Math.round((end - start) / 86400000);
+          if (totalDays <= 0) return sum;
+          const horsesInBatch = (b.horse_ids || []).length || 1;
+          const costPerDayPerHorse = Number(b.total_cost) / totalDays / horsesInBatch;
+          let daysInMonth = 0;
+          const cur = new Date(start);
+          for (let i = 0; i < totalDays; i++) {
+            if (dateToISO(cur).slice(0, 7) === currentMonthKey) daysInMonth++;
+            cur.setDate(cur.getDate() + 1);
+          }
+          return sum + costPerDayPerHorse * daysInMonth;
         }, 0);
-        return monthlyCost > 0 ? (
+        const monthlyCost = ownCost + generalShare + hayCost;
+        return monthlyCost > 0.004 ? (
           <Card style={{ marginBottom: 10, background: "#F3ECDD" }}>
             <div style={{ fontSize: 12, color: COLOR.inkSoft }}>Kosten diesen Monat (anteilig verteilt)</div>
             <div style={{ fontFamily: "Fraunces, serif", fontSize: 18, fontWeight: 700, color: COLOR.ink }}>{monthlyCost.toFixed(2)} €</div>
+            <div style={{ fontSize: 11, color: COLOR.inkSoft, marginTop: 2 }}>
+              davon {ownCost.toFixed(2)} € direkt, {generalShare.toFixed(2)} € Anteil an Stallkosten{hayCost > 0.004 ? `, ${hayCost.toFixed(2)} € Heu` : ""}
+            </div>
           </Card>
         ) : null;
       })()}
@@ -716,6 +627,9 @@ function PferdDetail({ horse, user, isAdmin, onBack, onSave, onDelete }) {
       {showNewMedication && <NewMedicationModal onClose={() => setShowNewMedication(false)} onSave={addMedication} />}
       {showNewWeight && <NewWeightModal onClose={() => setShowNewWeight(false)} onSave={addWeight} />}
       {showNewExpense && <NewPrivateExpenseModal onClose={() => setShowNewExpense(false)} onSave={addPrivateExpense} />}
+      {showNewHorseRecurring && (
+        <NewHorseRecurringModal horseName={horse.name} people={people} onClose={() => setShowNewHorseRecurring(false)} onSave={addHorseRecurring} />
+      )}
 
       {viewerPhoto && (
         <PhotoViewerModal
@@ -963,6 +877,44 @@ function NewPrivateExpenseModal({ onClose, onSave }) {
         disabled={!description.trim() || !amount}
         onClick={() => onSave({ date, description: description.trim(), amount, note, photoFile })}
         style={{ ...btnPrimary, width: "100%", padding: "11px 0", opacity: (!description.trim() || !amount) ? 0.5 : 1 }}
+      >Speichern</button>
+    </Modal>
+  );
+}
+
+function NewHorseRecurringModal({ horseName, people, onClose, onSave }) {
+  const [desc, setDesc] = useState("");
+  const [amount, setAmount] = useState("");
+  const [paidBy, setPaidBy] = useState(people[0] || "");
+  const [selected, setSelected] = useState(people);
+  const toggle = (u) => setSelected((p) => (p.includes(u) ? p.filter((x) => x !== u) : [...p, u]));
+  const canSave = desc.trim() && amount && paidBy && selected.length > 0;
+  return (
+    <Modal title={`Wiederkehrende Kosten für ${horseName}`} onClose={onClose}>
+      <div style={{ fontSize: 11.5, color: COLOR.inkSoft, marginBottom: 12 }}>
+        Wird automatisch einmal pro Monat als neue Ausgabe für {horseName} angelegt (sichtbar, sobald du die Finanzen-Seite einmal geöffnet hast).
+      </div>
+      <label style={labelStyle}>Beschreibung</label>
+      <input style={inputStyle} value={desc} onChange={(e) => setDesc(e.target.value)} placeholder="z. B. Pferdeversicherung" />
+      <label style={labelStyle}>Betrag monatlich (€)</label>
+      <input type="number" style={inputStyle} value={amount} onChange={(e) => setAmount(e.target.value)} />
+      <label style={labelStyle}>Bezahlt von</label>
+      <select style={inputStyle} value={paidBy} onChange={(e) => setPaidBy(e.target.value)}>
+        {people.map((u) => <option key={u}>{u}</option>)}
+      </select>
+      <label style={labelStyle}>Aufteilen auf (gleichmäßig)</label>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 16 }}>
+        {people.map((u) => (
+          <button key={u} type="button" onClick={() => toggle(u)} style={{
+            padding: "6px 11px", borderRadius: 999, border: `1px solid ${selected.includes(u) ? COLOR.accent : COLOR.line}`,
+            background: selected.includes(u) ? "#F3ECDD" : "#fff", fontSize: 12.5, cursor: "pointer", color: COLOR.ink,
+          }}>{u}</button>
+        ))}
+      </div>
+      <button
+        disabled={!canSave}
+        onClick={() => onSave({ desc: desc.trim(), amount, paidBy, people: selected })}
+        style={{ ...btnPrimary, width: "100%", padding: "11px 0", opacity: canSave ? 1 : 0.5 }}
       >Speichern</button>
     </Modal>
   );

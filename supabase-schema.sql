@@ -636,9 +636,11 @@ create table if not exists hay_batches (
   bale_count int not null,
   horse_ids uuid[] not null default '{}',
   date_ran_out date, -- wird nachträglich eingetragen, sobald der Ballen aufgebraucht ist
+  total_cost numeric, -- Gesamtpreis (optional), wird nach Aufbrauchen auf die Monate/Tage verteilt
   note text,
   created_at timestamptz default now()
 );
+alter table hay_batches add column if not exists total_cost numeric;
 alter table hay_batches enable row level security;
 drop policy if exists "hay_batches_all" on hay_batches;
 create policy "hay_batches_all" on hay_batches for all using (auth.role() = 'authenticated') with check (auth.role() = 'authenticated');

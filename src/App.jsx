@@ -8,6 +8,7 @@ import Dashboard from "./pages/Dashboard";
 import Aufgaben from "./pages/Aufgaben";
 import Kalender from "./pages/Kalender";
 import Pferde from "./pages/Pferde";
+import Orga from "./pages/Orga";
 import Finanzen from "./pages/Finanzen";
 
 export default function App() {
@@ -87,6 +88,7 @@ function MainApp({ profile }) {
         <Route path="/kalender" element={<Kalender user={profile.name} />} />
         <Route path="/pferde" element={<Pferde user={profile.name} isAdmin={profile.is_admin} />} />
         <Route path="/finanzen" element={<Finanzen user={profile.name} isAdmin={profile.is_admin} />} />
+        <Route path="/orga" element={<Orga user={profile.name} isAdmin={profile.is_admin} />} />
       </Routes>
       <BottomNav />
     </div>
