@@ -628,6 +628,22 @@ alter table standing_orders enable row level security;
 drop policy if exists "standing_orders_all" on standing_orders;
 create policy "standing_orders_all" on standing_orders for all using (auth.role() = 'authenticated') with check (auth.role() = 'authenticated');
 
+-- Regelmäßige Abwesenheiten (z.B. "Tanja ist immer freitags nicht da") – erzeugt
+-- automatisch die passenden Betreuungsaufgaben für die kommenden Tage.
+create table if not exists recurring_absences (
+  id uuid primary key default gen_random_uuid(),
+  person text not null,
+  weekday int not null, -- 0=Sonntag … 6=Samstag (wie JS Date.getDay())
+  horse_ids uuid[] not null default '{}',
+  substitute text, -- wer direkt übernimmt (optional, sonst offen für alle)
+  time text,
+  active boolean not null default true,
+  created_at timestamptz default now()
+);
+alter table recurring_absences enable row level security;
+drop policy if exists "recurring_absences_all" on recurring_absences;
+create policy "recurring_absences_all" on recurring_absences for all using (auth.role() = 'authenticated') with check (auth.role() = 'authenticated');
+
 -- Heu-Verbrauch: Ballenanzahl + Zeitraum (wie lange gehalten) + beteiligte Pferde,
 -- damit sich der Verbrauch für Winter- (Sep-Apr) und Sommermonate hochrechnen lässt.
 create table if not exists hay_batches (

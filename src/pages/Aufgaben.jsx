@@ -19,6 +19,8 @@ export default function Aufgaben({ user, isAdmin }) {
   const [showDaily, setShowDaily] = useState(false);
   const [showManageCategories, setShowManageCategories] = useState(false);
   const [cleanedUp, setCleanedUp] = useState(null); // Liste kürzlich gelöschter alter Aufgaben, zum Anzeigen
+  const [recurringAbsences, setRecurringAbsences] = useState([]);
+  const [showManageAbsences, setShowManageAbsences] = useState(false);
 
   // Aufgaben, die schon 4 Wochen oder länger vorbei sind, endgültig löschen –
   // aber nur erledigte. Offene (nicht übernommene/nicht erledigte) Aufgaben bleiben
@@ -35,14 +37,16 @@ export default function Aufgaben({ user, isAdmin }) {
 
   const load = async () => {
     await cleanupOldTasks();
-    const [tasksRes, horsesRes, peopleRes, categoriesRes] = await Promise.all([
+    const [tasksRes, horsesRes, peopleRes, categoriesRes, recurringAbsencesRes] = await Promise.all([
       supabase.from("tasks").select("*").order("date").order("time"),
       supabase.from("horses").select("*"),
       supabase.from("profiles").select("name"),
       supabase.from("task_categories").select("*").order("created_at"),
+      supabase.from("recurring_absences").select("*").order("created_at"),
     ]);
     setTasks(tasksRes.data ?? []);
     setHorses(horsesRes.data ?? []);
+    setRecurringAbsences(recurringAbsencesRes.data ?? []);
     setPeople((peopleRes.data ?? []).map((p) => p.name));
     setCategories(categoriesRes.data ?? []);
     setLoading(false);
@@ -110,13 +114,13 @@ export default function Aufgaben({ user, isAdmin }) {
         const horseName = horses.find((h) => h.id === hid)?.name || "";
         const desc = data.askedPeople.length ? `Angefragt: ${data.askedPeople.join(", ")}` : "";
         rows.push({
-          title: `${horseName} versorgen (${user} abwesend)`,
+          title: `${horseName} versorgen (${data.absentPerson} abwesend)`,
           description: desc,
           type: "uebernahme_erledigt",
           date: d,
           time: data.time || null,
           horse_ids: [hid],
-          assigned_users: [],
+          assigned_users: data.substitute ? [data.substitute] : [],
           done: false,
           recurring: false,
         });
@@ -125,6 +129,23 @@ export default function Aufgaben({ user, isAdmin }) {
     }
     await supabase.from("tasks").insert(rows);
     setShowAbsence(false);
+    load();
+  };
+
+  const addRecurringAbsence = async (data) => {
+    await supabase.from("recurring_absences").insert({
+      person: data.absentPerson, weekday: data.weekday, horse_ids: data.horseIds,
+      substitute: data.substitute || null, time: data.time || null, active: true,
+    });
+    setShowAbsence(false);
+    load();
+  };
+  const toggleRecurringAbsence = async (ra) => {
+    await supabase.from("recurring_absences").update({ active: !ra.active }).eq("id", ra.id);
+    load();
+  };
+  const deleteRecurringAbsence = async (id) => {
+    await supabase.from("recurring_absences").delete().eq("id", id);
     load();
   };
 
@@ -190,7 +211,10 @@ export default function Aufgaben({ user, isAdmin }) {
         </Card>
       )}
       <SectionTitle right={
-        <div style={{ display: "flex", gap: 6 }}>
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", justifyContent: "flex-end" }}>
+          {recurringAbsences.length > 0 && (
+            <IconBtn onClick={() => setShowManageAbsences(true)}>🔁 Abwesenheiten</IconBtn>
+          )}
           <IconBtn onClick={() => setShowAbsence(true)}>🧳 Abwesenheit</IconBtn>
           <IconBtn onClick={() => setShowNew(true)}><Plus size={15} /> Aufgabe</IconBtn>
         </div>
@@ -242,7 +266,12 @@ export default function Aufgaben({ user, isAdmin }) {
         </>
       )}
       {showNew && <NewTaskModal horses={horses} people={people} categories={categories} onClose={() => setShowNew(false)} onSave={addTask} />}
-      {showAbsence && <NewAbsenceModal horses={horses} people={people.filter((p) => p !== user)} onClose={() => setShowAbsence(false)} onSave={addAbsence} />}
+      {showAbsence && (
+        <NewAbsenceModal
+          horses={horses} people={people} currentUser={user}
+          onClose={() => setShowAbsence(false)} onSave={addAbsence} onSaveRecurring={addRecurringAbsence}
+        />
+      )}
       {editTask && (
         <NewTaskModal
           horses={horses} people={people} categories={categories} editing={editTask}
@@ -252,7 +281,47 @@ export default function Aufgaben({ user, isAdmin }) {
       {showManageCategories && (
         <ManageCategoriesModal categories={categories} onAdd={addCategory} onDelete={deleteCategory} onClose={() => setShowManageCategories(false)} />
       )}
+      {showManageAbsences && (
+        <ManageAbsencesModal
+          absences={recurringAbsences} horses={horses}
+          onToggle={toggleRecurringAbsence} onDelete={deleteRecurringAbsence}
+          onClose={() => setShowManageAbsences(false)}
+        />
+      )}
     </div>
+  );
+}
+
+function ManageAbsencesModal({ absences, horses, onToggle, onDelete, onClose }) {
+  const [confirmDeleteId, setConfirmDeleteId] = useState(null);
+  return (
+    <Modal title="Regelmäßige Abwesenheiten" onClose={onClose}>
+      {absences.map((ra) => (
+        <div key={ra.id} style={{ padding: "10px 0", borderBottom: `1px solid ${COLOR.line}`, opacity: ra.active ? 1 : 0.5 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+            <div>
+              <div style={{ fontSize: 13.5, fontWeight: 600, color: COLOR.ink }}>{ra.person} · {WEEKDAY_LABELS[ra.weekday]}{!ra.active && " · pausiert"}</div>
+              <div style={{ fontSize: 11.5, color: COLOR.inkSoft, marginTop: 2 }}>
+                {(ra.horse_ids || []).map((id) => horses.find((h) => h.id === id)?.name).filter(Boolean).join(", ")}
+                {ra.substitute && ` · ${ra.substitute} übernimmt`}
+              </div>
+            </div>
+            <div style={{ display: "flex", gap: 6 }}>
+              <button onClick={() => onToggle(ra)} style={{ background: "none", border: "none", cursor: "pointer", color: COLOR.inkSoft, fontSize: 11.5 }}>
+                {ra.active ? "Pausieren" : "Aktivieren"}
+              </button>
+              {confirmDeleteId === ra.id ? (
+                <button onClick={() => { onDelete(ra.id); setConfirmDeleteId(null); }} style={{ background: "none", border: "none", cursor: "pointer", color: COLOR.dringend, fontSize: 11.5 }}>sicher?</button>
+              ) : (
+                <button onClick={() => setConfirmDeleteId(ra.id)} style={{ background: "none", border: "none", cursor: "pointer", color: COLOR.dringend }}>
+                  <Trash2 size={13} />
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      ))}
+    </Modal>
   );
 }
 
@@ -340,26 +409,68 @@ function TaskCard({ task, horses, user, onUebernehmen, onErledigt, onZurueck, on
   );
 }
 
-function NewAbsenceModal({ horses, people, onClose, onSave }) {
+const WEEKDAY_LABELS = ["Sonntag", "Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag", "Samstag"];
+
+function NewAbsenceModal({ horses, people, currentUser, onClose, onSave, onSaveRecurring }) {
+  const [mode, setMode] = useState("einmalig"); // einmalig | regelmaessig
+  const [absentPerson, setAbsentPerson] = useState(currentUser);
   const [from, setFrom] = useState(todayISO());
   const [to, setTo] = useState(todayISO());
+  const [weekday, setWeekday] = useState(new Date().getDay());
   const [time, setTime] = useState("");
   const [horseIds, setHorseIds] = useState([]);
   const [askedPeople, setAskedPeople] = useState([]);
+  const [substitute, setSubstitute] = useState("");
 
   const toggleHorse = (id) => setHorseIds((h) => (h.includes(id) ? h.filter((x) => x !== id) : [...h, id]));
   const togglePerson = (p) => setAskedPeople((a) => (a.includes(p) ? a.filter((x) => x !== p) : [...a, p]));
+  const modeBtn = { flex: 1, padding: "8px 0", borderRadius: 9, border: `1px solid ${COLOR.line}`, background: "#fff", fontSize: 13, fontWeight: 600, cursor: "pointer" };
+  const canSave = horseIds.length > 0 && absentPerson && (mode === "einmalig" ? from <= to : true);
+
+  const save = () => {
+    if (mode === "regelmaessig") {
+      onSaveRecurring({ absentPerson, weekday: Number(weekday), horseIds, substitute, time });
+    } else {
+      onSave({ absentPerson, from, to, time, horseIds, askedPeople, substitute });
+    }
+  };
 
   return (
     <Modal title="Abwesenheit melden" onClose={onClose}>
-      <div style={{ fontSize: 12.5, color: COLOR.inkSoft, marginBottom: 12 }}>
-        Für jeden Tag im Zeitraum wird pro ausgewähltem Pferd eine offene Aufgabe erstellt, die übernommen werden kann.
+      <label style={labelStyle}>Wer ist abwesend?</label>
+      <select style={inputStyle} value={absentPerson} onChange={(e) => setAbsentPerson(e.target.value)}>
+        {people.map((p) => <option key={p} value={p}>{p}</option>)}
+      </select>
+
+      <label style={labelStyle}>Wie oft?</label>
+      <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+        <button type="button" onClick={() => setMode("einmalig")} style={{ ...modeBtn, ...(mode === "einmalig" ? { background: "#F3ECDD", borderColor: COLOR.accent } : {}) }}>Einmalig</button>
+        <button type="button" onClick={() => setMode("regelmaessig")} style={{ ...modeBtn, ...(mode === "regelmaessig" ? { background: "#F3ECDD", borderColor: COLOR.accent } : {}) }}>Jede Woche</button>
       </div>
-      <div style={{ display: "flex", gap: 10 }}>
-        <div style={{ flex: 1 }}><label style={labelStyle}>Von</label><input type="date" style={inputStyle} value={from} onChange={(e) => setFrom(e.target.value)} /></div>
-        <div style={{ flex: 1 }}><label style={labelStyle}>Bis</label><input type="date" style={inputStyle} value={to} onChange={(e) => setTo(e.target.value)} /></div>
-      </div>
-      <label style={labelStyle}>Uhrzeit (optional, für alle Tage gleich)</label>
+
+      {mode === "einmalig" ? (
+        <>
+          <div style={{ fontSize: 12.5, color: COLOR.inkSoft, marginBottom: 12 }}>
+            Für jeden Tag im Zeitraum wird pro ausgewähltem Pferd eine Aufgabe erstellt.
+          </div>
+          <div style={{ display: "flex", gap: 10 }}>
+            <div style={{ flex: 1 }}><label style={labelStyle}>Von</label><input type="date" style={inputStyle} value={from} onChange={(e) => setFrom(e.target.value)} /></div>
+            <div style={{ flex: 1 }}><label style={labelStyle}>Bis</label><input type="date" style={inputStyle} value={to} onChange={(e) => setTo(e.target.value)} /></div>
+          </div>
+        </>
+      ) : (
+        <>
+          <div style={{ fontSize: 12.5, color: COLOR.inkSoft, marginBottom: 12 }}>
+            Erzeugt automatisch jede Woche an diesem Wochentag die passende(n) Aufgabe(n), für die kommenden Tage im Voraus.
+          </div>
+          <label style={labelStyle}>Wochentag</label>
+          <select style={inputStyle} value={weekday} onChange={(e) => setWeekday(e.target.value)}>
+            {WEEKDAY_LABELS.map((l, i) => <option key={i} value={i}>{l}</option>)}
+          </select>
+        </>
+      )}
+
+      <label style={labelStyle}>Uhrzeit (optional)</label>
       <input type="time" style={inputStyle} value={time} onChange={(e) => setTime(e.target.value)} />
       <label style={labelStyle}>Welche Pferde brauchen Betreuung?</label>
       <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 12 }}>
@@ -370,20 +481,32 @@ function NewAbsenceModal({ horses, people, onClose, onSave }) {
           }}>{h.name}</button>
         ))}
       </div>
-      <label style={labelStyle}>Wen möchtest du fragen? (optional, nur als Hinweis – jede:r kann trotzdem übernehmen)</label>
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 14 }}>
-        {people.map((p) => (
-          <button key={p} onClick={() => togglePerson(p)} type="button" style={{
-            padding: "6px 11px", borderRadius: 999, border: `1px solid ${askedPeople.includes(p) ? COLOR.accent : COLOR.line}`,
-            background: askedPeople.includes(p) ? "#F3ECDD" : "#fff", fontSize: 12.5, cursor: "pointer", color: COLOR.ink,
-          }}>{p}</button>
-        ))}
-      </div>
+
+      <label style={labelStyle}>Direkt zuweisen (optional – sonst offen für alle)</label>
+      <select style={inputStyle} value={substitute} onChange={(e) => setSubstitute(e.target.value)}>
+        <option value="">Offen lassen – wer zuerst übernimmt</option>
+        {people.filter((p) => p !== absentPerson).map((p) => <option key={p} value={p}>{p}</option>)}
+      </select>
+
+      {mode === "einmalig" && (
+        <>
+          <label style={labelStyle}>Wen möchtest du fragen? (optional, nur als Hinweis)</label>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 14 }}>
+            {people.filter((p) => p !== absentPerson).map((p) => (
+              <button key={p} onClick={() => togglePerson(p)} type="button" style={{
+                padding: "6px 11px", borderRadius: 999, border: `1px solid ${askedPeople.includes(p) ? COLOR.accent : COLOR.line}`,
+                background: askedPeople.includes(p) ? "#F3ECDD" : "#fff", fontSize: 12.5, cursor: "pointer", color: COLOR.ink,
+              }}>{p}</button>
+            ))}
+          </div>
+        </>
+      )}
+
       <button
-        disabled={horseIds.length === 0 || from > to}
-        onClick={() => onSave({ from, to, time, horseIds, askedPeople })}
-        style={{ ...btnPrimary, width: "100%", padding: "11px 0", opacity: horseIds.length === 0 || from > to ? 0.5 : 1 }}
-      >Betreuungsanfragen erstellen</button>
+        disabled={!canSave}
+        onClick={save}
+        style={{ ...btnPrimary, width: "100%", padding: "11px 0", opacity: canSave ? 1 : 0.5 }}
+      >{mode === "regelmaessig" ? "Regelmäßige Abwesenheit speichern" : "Betreuungsaufgaben erstellen"}</button>
     </Modal>
   );
 }

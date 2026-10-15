@@ -79,13 +79,14 @@ export default function Dashboard({ user }) {
   useEffect(() => {
     (async () => {
       const t = todayISO();
-      const [tasksRes, eventsRes, horsesRes, expensesRes, turnoutStagesRes, turnoutSettingsRes] = await Promise.all([
+      const [tasksRes, eventsRes, horsesRes, expensesRes, turnoutStagesRes, turnoutSettingsRes, recurringAbsencesRes] = await Promise.all([
         supabase.from("tasks").select("*").lte("date", addDays(t, 7)).order("date"),
         supabase.from("events").select("*").eq("date", t),
         supabase.from("horses").select("*"),
         supabase.from("expenses").select("*, expense_splits(*)"),
         supabase.from("turnout_plan_stages").select("*").order("order_index"),
         supabase.from("turnout_plan_settings").select("*").eq("id", 1).maybeSingle(),
+        supabase.from("recurring_absences").select("*").eq("active", true),
       ]);
       const existingTasks = tasksRes.data ?? [];
       const horsesData = horsesRes.data ?? [];
@@ -123,6 +124,28 @@ export default function Dashboard({ user }) {
           });
         }
       }
+
+      // Regelmäßige Abwesenheiten: für die kommenden 7 Tage prüfen, an welchen der
+      // eingetragene Wochentag zutrifft, und die passende(n) Betreuungsaufgabe(n) anlegen,
+      // falls dafür noch keine existiert.
+      const recurringAbsences = recurringAbsencesRes.data ?? [];
+      recurringAbsences.forEach((ra) => {
+        for (let i = 0; i <= 7; i++) {
+          const d = addDays(t, i);
+          if (new Date(d + "T00:00:00").getDay() !== ra.weekday) continue;
+          (ra.horse_ids || []).forEach((hid) => {
+            const horseName = horsesData.find((h) => h.id === hid)?.name || "";
+            const title = `${horseName} versorgen (${ra.person} abwesend)`;
+            const alreadyExists = existingTasks.some((task) => task.title === title && task.date === d);
+            if (!alreadyExists) {
+              newReminders.push({
+                title, description: null, type: "uebernahme_erledigt", date: d, time: ra.time || null,
+                horse_ids: [hid], assigned_users: ra.substitute ? [ra.substitute] : [], done: false, recurring: false,
+              });
+            }
+          });
+        }
+      });
 
       if (newReminders.length > 0) {
         const { data: inserted } = await supabase.from("tasks").insert(newReminders).select();
