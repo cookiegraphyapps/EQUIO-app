@@ -272,7 +272,12 @@ export default function Dashboard({ user }) {
       {myTasks.length === 0 && <Empty text="Nichts Offenes für dich – schönen Tag!" />}
       {myTasks.map((x) => (
         <Card key={x.id} style={{ marginBottom: 8, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <span style={{ fontSize: 14, color: COLOR.ink, fontWeight: 600 }}>{x.title}</span>
+          <div>
+            <div style={{ fontSize: 14, color: COLOR.ink, fontWeight: 600 }}>{x.title}</div>
+            <div style={{ fontSize: 11.5, color: COLOR.inkSoft, marginTop: 2 }}>
+              {x.date_end ? `${fmtDate(x.date)} – ${fmtDate(x.date_end)}` : fmtDate(x.date)}{x.time ? `, ${x.time}` : ""}
+            </div>
+          </div>
           <Pill bg={COLOR.uebernommenBg} fg={COLOR.uebernommen}>übernommen</Pill>
         </Card>
       ))}

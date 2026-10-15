@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { ChevronLeft, ChevronRight, Plus, Briefcase } from "lucide-react";
+import { ChevronLeft, ChevronRight, Plus, Briefcase, X } from "lucide-react";
 import { supabase } from "../supabaseClient";
 import { SectionTitle, IconBtn, Modal, COLOR, todayISO, addMonths, dateToISO, parseISODate, fmtDate, inputStyle, labelStyle, btnPrimary, btnGhost, navBtn } from "../components/ui";
 import PacklistenOverview, { PACKING_CATEGORIES, createPackingList, fetchPackingListForEvent, ListDetail } from "../components/Packliste";
@@ -40,23 +40,63 @@ export default function Kalender({ user }) {
   const [people, setPeople] = useState([]);
   const [horses, setHorses] = useState([]);
   const [showPacklisten, setShowPacklisten] = useState(false);
+  const [confirmDeleteTaskId, setConfirmDeleteTaskId] = useState(null);
 
   const grid = monthGrid(cursor);
 
   const load = async () => {
     const { from, to } = grid;
-    const [eventsRes, tasksRes, personalRes, peopleRes, horsesRes] = await Promise.all([
+    const [eventsRes, tasksRes, personalRes, peopleRes, horsesRes, recurringAbsencesRes] = await Promise.all([
       supabase.from("events").select("*").gte("date", from).lte("date", to),
       supabase.from("tasks").select("*").gte("date", from).lte("date", to),
       supabase.from("personal_events").select("*").gte("date", from).lte("date", to),
       supabase.from("profiles").select("name"),
       supabase.from("horses").select("id, name, born"),
+      supabase.from("recurring_absences").select("*").eq("active", true),
     ]);
+    const existingTasks = tasksRes.data ?? [];
+    const horsesData = horsesRes.data ?? [];
+
+    // Regelmäßige Abwesenheiten auch für den gerade sichtbaren Monat erzeugen (nicht nur
+    // für die nächsten 7 Tage über das Dashboard), damit sie beim Blättern im Kalender
+    // zuverlässig auftauchen und einzeln gelöscht werden können.
+    const newTasks = [];
+    (recurringAbsencesRes.data ?? []).forEach((ra) => {
+      const cur = parseISODate(from);
+      const endDate = parseISODate(to);
+      while (cur <= endDate) {
+        const d = dateToISO(cur);
+        if (cur.getDay() === ra.weekday) {
+          (ra.horse_ids || []).forEach((hid) => {
+            const horseName = horsesData.find((h) => h.id === hid)?.name || "";
+            const title = `${horseName} versorgen (${ra.person} abwesend)`;
+            const alreadyExists = existingTasks.some((task) => task.title === title && task.date === d);
+            if (!alreadyExists) {
+              newTasks.push({
+                title, description: null, type: "uebernahme_erledigt", date: d, time: ra.time || null,
+                horse_ids: [hid], assigned_users: ra.substitute ? [ra.substitute] : [], done: false, recurring: false,
+              });
+            }
+          });
+        }
+        cur.setDate(cur.getDate() + 1);
+      }
+    });
+    if (newTasks.length > 0) {
+      const { data: inserted } = await supabase.from("tasks").insert(newTasks).select();
+      if (inserted) existingTasks.push(...inserted);
+    }
+
     setEvents(eventsRes.data ?? []);
-    setTasks(tasksRes.data ?? []);
+    setTasks(existingTasks);
     setPersonalEvents(personalRes.data ?? []);
     setPeople((peopleRes.data ?? []).map((p) => p.name));
-    setHorses(horsesRes.data ?? []);
+    setHorses(horsesData);
+  };
+
+  const deleteTask = async (id) => {
+    await supabase.from("tasks").delete().eq("id", id);
+    load();
   };
 
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [cursor]);
@@ -179,6 +219,7 @@ export default function Kalender({ user }) {
         {selectedList.length === 0 && <div style={{ fontSize: 12.5, color: COLOR.inkSoft, paddingLeft: 2 }}>–</div>}
         {selectedList.map((e, i) => {
           const clickable = !e.type && !e.virtual; // Aufgaben (type) und Geburtstage (virtual) sind nicht bearbeitbar
+          const isTask = !!e.type;
           return (
             <div key={i} onClick={() => clickable && setEditEntry(e)} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 2px", cursor: clickable ? "pointer" : "default" }}>
               <span style={{ width: 8, height: 8, borderRadius: 4, background: cmap[e.kind], flexShrink: 0 }} />
@@ -186,6 +227,15 @@ export default function Kalender({ user }) {
                 {e.title}{e.with_user && <span style={{ color: COLOR.inkSoft }}> · mit {e.with_user}</span>}
               </span>
               {e.time && <span style={{ fontSize: 12, color: COLOR.inkSoft }}>{e.time}</span>}
+              {isTask && (
+                confirmDeleteTaskId === e.id ? (
+                  <button onClick={(ev) => { ev.stopPropagation(); deleteTask(e.id); setConfirmDeleteTaskId(null); }} style={{ background: "none", border: "none", cursor: "pointer", color: COLOR.dringend, fontSize: 11 }}>sicher?</button>
+                ) : (
+                  <button onClick={(ev) => { ev.stopPropagation(); setConfirmDeleteTaskId(e.id); }} style={{ background: "none", border: "none", cursor: "pointer", color: COLOR.inkSoft, flexShrink: 0 }}>
+                    <X size={13} />
+                  </button>
+                )
+              )}
             </div>
           );
         })}
