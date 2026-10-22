@@ -672,9 +672,13 @@ function NewRecurringExpenseModal({ people, horses, editing, onClose, onSave }) 
   );
   const [horseId, setHorseId] = useState(editing?.horse_id || "");
   const [splitByHorse, setSplitByHorse] = useState(editing?.split_by_horse || false);
+  const [horseSplitMode, setHorseSplitMode] = useState("even"); // even | custom
   const [horseSplits, setHorseSplits] = useState(
     editing?.horse_splits ? Object.fromEntries(Object.entries(editing.horse_splits).map(([k, v]) => [k, String(v)])) : {}
   );
+  const [evenHorseIds, setEvenHorseIds] = useState(editing?.split_by_horse ? Object.keys(editing.horse_splits || {}) : horses.map((h) => h.id));
+  const [evenHorseAmount, setEvenHorseAmount] = useState("");
+  const toggleEvenHorse = (id) => setEvenHorseIds((hs) => (hs.includes(id) ? hs.filter((x) => x !== id) : [...hs, id]));
   const [months, setMonths] = useState(editing?.months || []);
   const toggleMonth = (m) => setMonths((ms) => (ms.includes(m) ? ms.filter((x) => x !== m) : [...ms, m].sort((a, b) => a - b)));
   const toggle = (u) => setSelected((p) => (p.includes(u) ? p.filter((x) => x !== u) : [...p, u]));
@@ -682,10 +686,16 @@ function NewRecurringExpenseModal({ people, horses, editing, onClose, onSave }) 
   const setHorseSplitAmount = (hid, val) => setHorseSplits((s) => ({ ...s, [hid]: val }));
   const modeBtn = { flex: 1, padding: "8px 0", borderRadius: 9, border: `1px solid ${COLOR.line}`, background: "#fff", fontSize: 13, fontWeight: 600, cursor: "pointer" };
   const customTotal = selected.reduce((a, u) => a + Number(splits[u] || 0), 0);
-  const horseTotal = Object.values(horseSplits).reduce((a, b) => a + Number(b || 0), 0);
+  // Bei Pro-Pferd-Aufteilung: "Gleichmäßig" rechnet den Gesamtbetrag gleichmäßig auf die
+  // markierten Pferde um, "Individuell" nutzt die händisch eingetragenen Beträge je Pferd.
+  const effectiveHorseSplits = horseSplitMode === "even"
+    ? Object.fromEntries(evenHorseIds.map((id) => [id, evenHorseIds.length > 0 ? +(Number(evenHorseAmount || 0) / evenHorseIds.length).toFixed(2) : 0]))
+    : horseSplits;
+  const horseTotal = Object.values(effectiveHorseSplits).reduce((a, b) => a + Number(b || 0), 0);
 
   const canSave = (desc.trim() && paidBy) &&
-    (splitByHorse ? horseTotal > 0 && selected.length > 0
+    (splitByHorse
+      ? (horseSplitMode === "even" ? evenHorseIds.length > 0 && Number(evenHorseAmount) > 0 : horseTotal > 0) && selected.length > 0
       : mode === "by_horse_count" ? amount && horses.some((h) => h.owner)
       : mode === "even" ? amount && selected.length > 0
       : customTotal > 0 && selected.length > 0);
@@ -705,18 +715,44 @@ function NewRecurringExpenseModal({ people, horses, editing, onClose, onSave }) 
 
       {splitByHorse ? (
         <>
-          <label style={labelStyle}>Betrag je Pferd</label>
           {horses.length === 0 && <div style={{ fontSize: 12.5, color: COLOR.inkSoft, marginBottom: 10 }}>Keine Pferde vorhanden.</div>}
-          {horses.map((h) => (
-            <div key={h.id} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
-              <span style={{ fontSize: 13, color: COLOR.ink, flex: 1 }}>🐴 {h.name}</span>
-              <input
-                type="number" style={{ ...inputStyle, width: 100, marginBottom: 0 }}
-                value={horseSplits[h.id] || ""} onChange={(e) => setHorseSplitAmount(h.id, e.target.value)} placeholder="0,00"
-              />
-              <span style={{ fontSize: 12.5, color: COLOR.inkSoft }}>€</span>
-            </div>
-          ))}
+          <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+            <button type="button" onClick={() => setHorseSplitMode("even")} style={{ ...modeBtn, ...(horseSplitMode === "even" ? { background: "#F3ECDD", borderColor: COLOR.accent } : {}) }}>Gleichmäßig</button>
+            <button type="button" onClick={() => setHorseSplitMode("custom")} style={{ ...modeBtn, ...(horseSplitMode === "custom" ? { background: "#F3ECDD", borderColor: COLOR.accent } : {}) }}>Individuell</button>
+          </div>
+          {horseSplitMode === "even" ? (
+            <>
+              <label style={labelStyle}>Welche Pferde?</label>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 12 }}>
+                {horses.map((h) => (
+                  <button key={h.id} type="button" onClick={() => toggleEvenHorse(h.id)} style={{
+                    padding: "6px 11px", borderRadius: 999, border: `1px solid ${evenHorseIds.includes(h.id) ? COLOR.accent : COLOR.line}`,
+                    background: evenHorseIds.includes(h.id) ? "#F3ECDD" : "#fff", fontSize: 12.5, cursor: "pointer", color: COLOR.ink,
+                  }}>🐴 {h.name}</button>
+                ))}
+              </div>
+              <label style={labelStyle}>Gesamtbetrag (€)</label>
+              <input type="number" style={inputStyle} value={evenHorseAmount} onChange={(e) => setEvenHorseAmount(e.target.value)} />
+              <div style={{ fontSize: 11.5, color: COLOR.inkSoft, marginTop: -8, marginBottom: 10 }}>
+                Wird gleichmäßig auf {evenHorseIds.length || 0} Pferd{evenHorseIds.length === 1 ? "" : "e"} verteilt
+                {evenHorseIds.length > 0 && evenHorseAmount && ` (je ${(Number(evenHorseAmount) / evenHorseIds.length).toFixed(2)} €)`}.
+              </div>
+            </>
+          ) : (
+            <>
+              <label style={labelStyle}>Betrag je Pferd</label>
+              {horses.map((h) => (
+                <div key={h.id} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+                  <span style={{ fontSize: 13, color: COLOR.ink, flex: 1 }}>🐴 {h.name}</span>
+                  <input
+                    type="number" style={{ ...inputStyle, width: 100, marginBottom: 0 }}
+                    value={horseSplits[h.id] || ""} onChange={(e) => setHorseSplitAmount(h.id, e.target.value)} placeholder="0,00"
+                  />
+                  <span style={{ fontSize: 12.5, color: COLOR.inkSoft }}>€</span>
+                </div>
+              ))}
+            </>
+          )}
           <div style={{ fontSize: 12.5, color: COLOR.inkSoft, marginTop: 4, marginBottom: 12 }}>
             Gesamt: <strong style={{ color: COLOR.ink }}>{horseTotal.toFixed(2)} €</strong> – es entsteht jeden Monat eine eigene Ausgabe pro Pferd.
           </div>
@@ -820,7 +856,7 @@ function NewRecurringExpenseModal({ people, horses, editing, onClose, onSave }) 
         onClick={() => onSave({
           desc: desc.trim(), amount, paidBy,
           people: mode === "by_horse_count" ? horses.filter((h) => h.owner).map((h) => h.owner) : selected,
-          mode, splits, horseId, splitByHorse, horseSplits, months, editingId: editing?.id,
+          mode, splits, horseId, splitByHorse, horseSplits: effectiveHorseSplits, months, editingId: editing?.id,
         })}
         style={{ ...btnPrimary, width: "100%", padding: "11px 0", opacity: canSave ? 1 : 0.5 }}>
         {editing ? "Änderungen speichern" : "Wiederkehrende Kosten speichern"}
