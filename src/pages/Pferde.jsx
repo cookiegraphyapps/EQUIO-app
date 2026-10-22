@@ -12,10 +12,15 @@ export default function Pferde({ user, isAdmin }) {
   const [open, setOpen] = useState(null);
   const [showAddHorse, setShowAddHorse] = useState(false);
   const [addHorseError, setAddHorseError] = useState("");
+  const [people, setPeople] = useState([]);
 
   const load = async () => {
-    const { data } = await supabase.from("horses").select("*").order("name");
-    setHorses(data ?? []);
+    const [horsesRes, peopleRes] = await Promise.all([
+      supabase.from("horses").select("*").order("name"),
+      supabase.from("profiles").select("name"),
+    ]);
+    setHorses(horsesRes.data ?? []);
+    setPeople((peopleRes.data ?? []).map((p) => p.name));
     setLoading(false);
   };
   useEffect(() => { load(); }, []);
@@ -79,12 +84,12 @@ export default function Pferde({ user, isAdmin }) {
           </Card>
         );
       })}
-      {showAddHorse && <AddHorseModal error={addHorseError} onClose={() => setShowAddHorse(false)} onSave={addHorse} />}
+      {showAddHorse && <AddHorseModal error={addHorseError} people={people} onClose={() => setShowAddHorse(false)} onSave={addHorse} />}
     </div>
   );
 }
 
-function AddHorseModal({ error, onClose, onSave }) {
+function AddHorseModal({ error, people, onClose, onSave }) {
   const [name, setName] = useState("");
   const [breed, setBreed] = useState("");
   const [born, setBorn] = useState("");
@@ -98,8 +103,11 @@ function AddHorseModal({ error, onClose, onSave }) {
       <input style={inputStyle} value={breed} onChange={(e) => setBreed(e.target.value)} />
       <label style={labelStyle}>Geburtstag (optional)</label>
       <input type="date" style={inputStyle} value={born} onChange={(e) => setBorn(e.target.value)} />
-      <label style={labelStyle}>Besitzer:in (optional)</label>
-      <input style={inputStyle} value={owner} onChange={(e) => setOwner(e.target.value)} />
+      <label style={labelStyle}>Besitzer:in (optional – wichtig für die faire Kostenaufteilung)</label>
+      <select style={inputStyle} value={owner} onChange={(e) => setOwner(e.target.value)}>
+        <option value="">Noch keine Angabe</option>
+        {people.map((p) => <option key={p} value={p}>{p}</option>)}
+      </select>
       <label style={labelStyle}>Notiz (optional)</label>
       <input style={inputStyle} value={note} onChange={(e) => setNote(e.target.value)} />
       {error && <div style={{ fontSize: 12.5, color: COLOR.dringend, marginBottom: 8 }}>{error}</div>}
@@ -335,7 +343,10 @@ function PferdDetail({ horse, user, isAdmin, onBack, onSave, onDelete }) {
             <label style={labelStyle}>Geburtstag</label>
             <input type="date" style={inputStyle} value={infoBorn} onChange={(e) => setInfoBorn(e.target.value)} />
             <label style={labelStyle}>Besitzer:in</label>
-            <input style={inputStyle} value={infoOwner} onChange={(e) => setInfoOwner(e.target.value)} />
+            <select style={inputStyle} value={infoOwner} onChange={(e) => setInfoOwner(e.target.value)}>
+              <option value="">Noch keine Angabe</option>
+              {people.map((p) => <option key={p} value={p}>{p}</option>)}
+            </select>
             <label style={labelStyle}>Notiz</label>
             <input style={inputStyle} value={infoNote} onChange={(e) => setInfoNote(e.target.value)} />
             <div style={{ display: "flex", gap: 8 }}>
