@@ -57,6 +57,8 @@ export default function Finanzen({ user, isAdmin }) {
   // Bei Pro-Pferd-Aufteilung wird pro Pferd eine eigene Ausgabe mit dessen Anteil erzeugt,
   // und die Personen-Aufteilung bezieht sich dann jeweils auf diesen Pferde-Anteil.
   const generateRecurring = async (recurring, existingExpenses) => {
+    const currentMonth = Number(todayISO().slice(5, 7));
+    if (recurring.months && recurring.months.length > 0 && !recurring.months.includes(currentMonth)) return;
     const monthStart = todayISO().slice(0, 7) + "-01";
     const alreadyExists = existingExpenses.some((ex) => ex.recurring_expense_id === recurring.id && ex.date >= monthStart);
     if (alreadyExists) return;
@@ -192,6 +194,7 @@ export default function Finanzen({ user, isAdmin }) {
       split_by_horse: data.splitByHorse,
       horse_splits: data.splitByHorse ? data.horseSplits : {},
       people: data.people, split_mode: data.mode, custom_splits: data.mode === "custom" ? data.splits : {},
+      months: data.months || [],
     };
     if (data.editingId) {
       await supabase.from("recurring_expenses").update(payload).eq("id", data.editingId);
@@ -379,7 +382,9 @@ export default function Finanzen({ user, isAdmin }) {
             <div>
               <div style={{ fontWeight: 700, fontSize: 13.5, color: COLOR.ink }}>{r.description}</div>
               <div style={{ fontSize: 11.5, color: COLOR.inkSoft }}>
-                bezahlt von {r.paid_by} · jeden Monat{!r.active && " · pausiert"}
+                bezahlt von {r.paid_by} · {r.months && r.months.length > 0
+                  ? `nur ${r.months.map((m) => ["Jan", "Feb", "Mär", "Apr", "Mai", "Jun", "Jul", "Aug", "Sep", "Okt", "Nov", "Dez"][m - 1]).join(", ")}`
+                  : "jeden Monat"}{!r.active && " · pausiert"}
                 {r.horse_id && ` · 🐴 ${horses.find((h) => h.id === r.horse_id)?.name || ""}`}
               </div>
             </div>
@@ -670,6 +675,8 @@ function NewRecurringExpenseModal({ people, horses, editing, onClose, onSave }) 
   const [horseSplits, setHorseSplits] = useState(
     editing?.horse_splits ? Object.fromEntries(Object.entries(editing.horse_splits).map(([k, v]) => [k, String(v)])) : {}
   );
+  const [months, setMonths] = useState(editing?.months || []);
+  const toggleMonth = (m) => setMonths((ms) => (ms.includes(m) ? ms.filter((x) => x !== m) : [...ms, m].sort((a, b) => a - b)));
   const toggle = (u) => setSelected((p) => (p.includes(u) ? p.filter((x) => x !== u) : [...p, u]));
   const setSplitAmount = (u, val) => setSplits((s) => ({ ...s, [u]: val }));
   const setHorseSplitAmount = (hid, val) => setHorseSplits((s) => ({ ...s, [hid]: val }));
@@ -796,12 +803,24 @@ function NewRecurringExpenseModal({ people, horses, editing, onClose, onSave }) 
           )}
         </>
       )}
+      <label style={labelStyle}>In welchen Monaten? (leer = jeden Monat)</label>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 16 }}>
+        {["Jan", "Feb", "Mär", "Apr", "Mai", "Jun", "Jul", "Aug", "Sep", "Okt", "Nov", "Dez"].map((label, i) => {
+          const m = i + 1;
+          return (
+            <button key={m} type="button" onClick={() => toggleMonth(m)} style={{
+              padding: "6px 10px", borderRadius: 999, border: `1px solid ${months.includes(m) ? COLOR.accent : COLOR.line}`,
+              background: months.includes(m) ? "#F3ECDD" : "#fff", fontSize: 12, cursor: "pointer", color: COLOR.ink,
+            }}>{label}</button>
+          );
+        })}
+      </div>
       <button
         disabled={!canSave}
         onClick={() => onSave({
           desc: desc.trim(), amount, paidBy,
           people: mode === "by_horse_count" ? horses.filter((h) => h.owner).map((h) => h.owner) : selected,
-          mode, splits, horseId, splitByHorse, horseSplits, editingId: editing?.id,
+          mode, splits, horseId, splitByHorse, horseSplits, months, editingId: editing?.id,
         })}
         style={{ ...btnPrimary, width: "100%", padding: "11px 0", opacity: canSave ? 1 : 0.5 }}>
         {editing ? "Änderungen speichern" : "Wiederkehrende Kosten speichern"}

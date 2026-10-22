@@ -603,6 +603,8 @@ create table if not exists recurring_expenses (
 );
 alter table recurring_expenses add column if not exists split_by_horse boolean not null default false;
 alter table recurring_expenses add column if not exists horse_splits jsonb default '{}';
+-- Monatszuordnung: leer/null = jeden Monat, sonst nur in diesen Monaten (1=Januar … 12=Dezember) generieren
+alter table recurring_expenses add column if not exists months int[] default '{}';
 alter table expenses add column if not exists recurring_expense_id uuid references recurring_expenses(id) on delete set null;
 
 alter table recurring_expenses enable row level security;
