@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { ChevronLeft, Syringe, Scissors, Stethoscope, Pill as PillIcon, Dumbbell, Plus, HeartPulse, Wheat, Pencil, Camera, X, Scale, Wallet } from "lucide-react";
 import { supabase, uploadPhoto } from "../supabaseClient";
 import { Card, SectionTitle, Empty, Pill, Modal, IconBtn, COLOR, fmtDate, daysUntil, nextDue, addMonths, addDays, dateToISO, parseISODate, HEALTH_LABELS, HEALTH_DEFAULT_INTERVAL, HEALTH_INTERVAL_UNIT, inputStyle, labelStyle, btnPrimary, btnGhost, navBtn, todayISO } from "../components/ui";
+import { BlanketCard } from "../components/Deckenguide";
 
 const ICONS = { impfung: Syringe, hufschmied: Scissors, zahnarzt: Stethoscope, entwurmung: PillIcon };
 const INTENSITAETEN = ["locker", "normal", "intensiv"];
@@ -368,6 +369,7 @@ function PferdDetail({ horse, user, isAdmin, onBack, onSave, onDelete }) {
           </>
         )}
       </div>
+      <BlanketCard horse={horse} isAdmin={isAdmin} onProfileChange={(key) => onSave({ blanket_profile: key })} />
       <SectionTitle>Gesundheit & Pflege</SectionTitle>
       {Object.keys(HEALTH_LABELS).map((k) => {
         const v = horse.health?.[k];

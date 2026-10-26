@@ -646,6 +646,71 @@ alter table recurring_absences enable row level security;
 drop policy if exists "recurring_absences_all" on recurring_absences;
 create policy "recurring_absences_all" on recurring_absences for all using (auth.role() = 'authenticated') with check (auth.role() = 'authenticated');
 
+-- Decken-Guide: zwei Profile (kälteempfindlich/normal) mit eigenen Temperaturschwellen,
+-- eine gemeinsame Regenintensitäts-/Mindestdauer-Tabelle, und globale Einstellungen
+-- (Standort für die Wetterabfrage, allgemeine Regen-Regel, Wind-Schwellen).
+create table if not exists blanket_profiles (
+  key text primary key, -- 'sensitive' | 'normal'
+  label text not null,
+  dry_upper numeric not null, -- über diesem Wert (trocken): keine Decke
+  dry_lower numeric not null, -- über diesem Wert bis einschl. dry_upper: leicht; darunter/gleich: dick
+  rain_upper numeric not null, -- über diesem Wert (nass): keine Decke
+  rain_lower numeric not null, -- über diesem Wert bis einschl. rain_upper: leicht; darunter/gleich: dick
+  min_cold_duration_hours numeric not null default 4, -- Kälte muss mind. so lange anhalten (trockene Regel)
+  night_rule_enabled boolean not null default false,
+  night_rain_rate numeric not null default 2.5,
+  night_rain_duration_min numeric not null default 120,
+  night_temp_cap numeric not null default 10
+);
+insert into blanket_profiles (key, label, dry_upper, dry_lower, rain_upper, rain_lower, min_cold_duration_hours, night_rule_enabled, night_rain_rate, night_rain_duration_min, night_temp_cap) values
+  ('sensitive', 'Kälteempfindliches Pony', 10, 5, 10, 5, 4, true, 2.5, 120, 10),
+  ('normal', 'Normales Pferd', 10, -2, 10, 2, 4, false, 2.5, 120, 10)
+on conflict (key) do nothing;
+
+create table if not exists rain_intensity_thresholds (
+  id uuid primary key default gen_random_uuid(),
+  min_mm_per_hour numeric not null,
+  max_mm_per_hour numeric, -- null = und mehr
+  min_duration_minutes numeric not null,
+  order_index int not null
+);
+insert into rain_intensity_thresholds (min_mm_per_hour, max_mm_per_hour, min_duration_minutes, order_index)
+select * from (values
+  (0.2, 0.5, 60, 1),
+  (0.5, 2.5, 30, 2),
+  (2.5, 10, 15, 3),
+  (10, null, 5, 4)
+) as seed(min_mm_per_hour, max_mm_per_hour, min_duration_minutes, order_index)
+where not exists (select 1 from rain_intensity_thresholds);
+
+create table if not exists blanket_settings (
+  id int primary key default 1,
+  latitude numeric not null default 49.4435,
+  longitude numeric not null default 6.6372,
+  rain_qualify_total_minutes numeric not null default 60,
+  wind_enabled boolean not null default true,
+  wind_mid_kmh numeric not null default 15,
+  wind_high_kmh numeric not null default 30,
+  constraint blanket_settings_singleton check (id = 1)
+);
+insert into blanket_settings (id) values (1) on conflict (id) do nothing;
+
+alter table horses add column if not exists blanket_profile text default 'normal'; -- 'sensitive' | 'normal'
+
+alter table blanket_profiles enable row level security;
+alter table rain_intensity_thresholds enable row level security;
+alter table blanket_settings enable row level security;
+drop policy if exists "blanket_profiles_select" on blanket_profiles;
+drop policy if exists "blanket_profiles_update" on blanket_profiles;
+drop policy if exists "rain_intensity_thresholds_all" on rain_intensity_thresholds;
+drop policy if exists "blanket_settings_select" on blanket_settings;
+drop policy if exists "blanket_settings_update" on blanket_settings;
+create policy "blanket_profiles_select" on blanket_profiles for select using (auth.role() = 'authenticated');
+create policy "blanket_profiles_update" on blanket_profiles for update using (auth.role() = 'authenticated');
+create policy "rain_intensity_thresholds_all" on rain_intensity_thresholds for all using (auth.role() = 'authenticated') with check (auth.role() = 'authenticated');
+create policy "blanket_settings_select" on blanket_settings for select using (auth.role() = 'authenticated');
+create policy "blanket_settings_update" on blanket_settings for update using (auth.role() = 'authenticated');
+
 -- Heu-Verbrauch: Ballenanzahl + Zeitraum (wie lange gehalten) + beteiligte Pferde,
 -- damit sich der Verbrauch für Winter- (Sep-Apr) und Sommermonate hochrechnen lässt.
 create table if not exists hay_batches (
