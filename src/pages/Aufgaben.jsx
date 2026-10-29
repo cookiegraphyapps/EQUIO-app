@@ -20,6 +20,9 @@ export default function Aufgaben({ user, isAdmin }) {
   const [showManageCategories, setShowManageCategories] = useState(false);
   const [cleanedUp, setCleanedUp] = useState(null); // Liste kürzlich gelöschter alter Aufgaben, zum Anzeigen
   const [recurringAbsences, setRecurringAbsences] = useState([]);
+  const [moveTemplates, setMoveTemplates] = useState([]);
+  const [showMove, setShowMove] = useState(false);
+  const [showManageMove, setShowManageMove] = useState(false);
   const [showManageAbsences, setShowManageAbsences] = useState(false);
 
   // Aufgaben, die schon 4 Wochen oder länger vorbei sind, endgültig löschen –
@@ -37,18 +40,20 @@ export default function Aufgaben({ user, isAdmin }) {
 
   const load = async () => {
     await cleanupOldTasks();
-    const [tasksRes, horsesRes, peopleRes, categoriesRes, recurringAbsencesRes] = await Promise.all([
+    const [tasksRes, horsesRes, peopleRes, categoriesRes, recurringAbsencesRes, moveTemplatesRes] = await Promise.all([
       supabase.from("tasks").select("*").order("date").order("time"),
       supabase.from("horses").select("*"),
       supabase.from("profiles").select("name"),
       supabase.from("task_categories").select("*").order("created_at"),
       supabase.from("recurring_absences").select("*").order("created_at"),
+      supabase.from("move_checklist_templates").select("*").order("order_index"),
     ]);
     setTasks(tasksRes.data ?? []);
     setHorses(horsesRes.data ?? []);
     setRecurringAbsences(recurringAbsencesRes.data ?? []);
     setPeople((peopleRes.data ?? []).map((p) => p.name));
     setCategories(categoriesRes.data ?? []);
+    setMoveTemplates(moveTemplatesRes.data ?? []);
     setLoading(false);
   };
 
@@ -149,6 +154,30 @@ export default function Aufgaben({ user, isAdmin }) {
     load();
   };
 
+  // Stallwechsel: erzeugt aus der Checklisten-Vorlage für die gewählte Saison echte
+  // Aufgaben für das angegebene Datum. Die Vorlage selbst bleibt unverändert erhalten,
+  // damit sie nächstes Jahr wieder genauso zur Verfügung steht.
+  const startMove = async (data) => {
+    const category = data.season === "winter" ? "umzug_winter" : "umzug_sommer";
+    const rows = data.items.map((text) => ({
+      title: text, type: "uebernahme_erledigt", date: data.date, horse_ids: [], assigned_users: [],
+      done: false, recurring: false, category,
+    }));
+    if (rows.length > 0) await supabase.from("tasks").insert(rows);
+    setShowMove(false);
+    load();
+  };
+  const addMoveTemplateItem = async (season, text) => {
+    if (!text.trim()) return;
+    const maxOrder = Math.max(0, ...moveTemplates.filter((t) => t.season === season).map((t) => t.order_index));
+    await supabase.from("move_checklist_templates").insert({ season, item_text: text.trim(), order_index: maxOrder + 1 });
+    load();
+  };
+  const deleteMoveTemplateItem = async (id) => {
+    await supabase.from("move_checklist_templates").delete().eq("id", id);
+    load();
+  };
+
   const updateTask = async (data) => {
     if (data.scope === "series" && editTask.series_id) {
       await supabase.from("tasks").update({
@@ -215,6 +244,7 @@ export default function Aufgaben({ user, isAdmin }) {
           {recurringAbsences.length > 0 && (
             <IconBtn onClick={() => setShowManageAbsences(true)}>🔁 Abwesenheiten</IconBtn>
           )}
+          <IconBtn onClick={() => setShowMove(true)}>🔄 Stallwechsel</IconBtn>
           <IconBtn onClick={() => setShowAbsence(true)}>🧳 Abwesenheit</IconBtn>
           <IconBtn onClick={() => setShowNew(true)}><Plus size={15} /> Aufgabe</IconBtn>
         </div>
@@ -266,6 +296,15 @@ export default function Aufgaben({ user, isAdmin }) {
         </>
       )}
       {showNew && <NewTaskModal horses={horses} people={people} categories={categories} onClose={() => setShowNew(false)} onSave={addTask} />}
+      {showMove && (
+        <NewMoveModal
+          templates={moveTemplates} onClose={() => setShowMove(false)} onSave={startMove}
+          onManage={() => { setShowMove(false); setShowManageMove(true); }}
+        />
+      )}
+      {showManageMove && (
+        <ManageMoveTemplateModal templates={moveTemplates} onAdd={addMoveTemplateItem} onDelete={deleteMoveTemplateItem} onClose={() => setShowManageMove(false)} />
+      )}
       {showAbsence && (
         <NewAbsenceModal
           horses={horses} people={people} currentUser={user}
@@ -406,6 +445,107 @@ function TaskCard({ task, horses, user, onUebernehmen, onErledigt, onZurueck, on
         </div>
       )}
     </Card>
+  );
+}
+
+function NewMoveModal({ templates, onClose, onSave, onManage }) {
+  const modeBtn = { flex: 1, padding: "8px 0", borderRadius: 9, border: `1px solid ${COLOR.line}`, background: "#fff", fontSize: 13, fontWeight: 600, cursor: "pointer" };
+  const [season, setSeason] = useState("winter");
+  const [date, setDate] = useState(todayISO());
+  const [items, setItems] = useState(templates.filter((t) => t.season === "winter").map((t) => t.item_text));
+  const [newItem, setNewItem] = useState("");
+
+  const chooseSeason = (s) => {
+    setSeason(s);
+    setItems(templates.filter((t) => t.season === s).map((t) => t.item_text));
+  };
+  const toggleItem = (text) => setItems((it) => (it.includes(text) ? it.filter((x) => x !== text) : [...it, text]));
+  const addAdHoc = () => {
+    if (!newItem.trim() || items.includes(newItem.trim())) return;
+    setItems((it) => [...it, newItem.trim()]);
+    setNewItem("");
+  };
+  const templateItems = templates.filter((t) => t.season === season);
+
+  return (
+    <Modal title="Stallwechsel" onClose={onClose}>
+      <div style={{ fontSize: 12.5, color: COLOR.inkSoft, marginBottom: 12 }}>
+        Erzeugt aus der Checkliste eine Aufgabe pro Punkt für das gewählte Datum. Die Vorlage bleibt unverändert – praktisch fürs nächste Jahr.
+      </div>
+      <label style={labelStyle}>Wohin wechselt ihr?</label>
+      <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+        <button type="button" onClick={() => chooseSeason("winter")} style={{ ...modeBtn, ...(season === "winter" ? { background: "#F3ECDD", borderColor: COLOR.accent } : {}) }}>❄️ Winterstall</button>
+        <button type="button" onClick={() => chooseSeason("sommer")} style={{ ...modeBtn, ...(season === "sommer" ? { background: "#F3ECDD", borderColor: COLOR.accent } : {}) }}>☀️ Sommerstall</button>
+      </div>
+      <label style={labelStyle}>Datum</label>
+      <input type="date" style={inputStyle} value={date} onChange={(e) => setDate(e.target.value)} />
+      <label style={labelStyle}>Checkliste</label>
+      {templateItems.length === 0 && <div style={{ fontSize: 12.5, color: COLOR.inkSoft, marginBottom: 8 }}>Noch keine festen Punkte für diese Saison.</div>}
+      <div style={{ marginBottom: 10 }}>
+        {templateItems.map((t) => (
+          <div key={t.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "5px 0" }}>
+            <button onClick={() => toggleItem(t.item_text)} style={{
+              width: 18, height: 18, borderRadius: 5, border: `2px solid ${items.includes(t.item_text) ? COLOR.erledigt : COLOR.line}`,
+              background: items.includes(t.item_text) ? COLOR.erledigt : "#fff", cursor: "pointer", flexShrink: 0,
+            }} />
+            <span style={{ fontSize: 13.5, color: COLOR.ink }}>{t.item_text}</span>
+          </div>
+        ))}
+      </div>
+      {items.filter((i) => !templateItems.some((t) => t.item_text === i)).map((i) => (
+        <div key={i} style={{ display: "flex", alignItems: "center", gap: 8, padding: "5px 0" }}>
+          <div style={{ width: 18, height: 18, borderRadius: 5, background: COLOR.erledigt, flexShrink: 0 }} />
+          <span style={{ fontSize: 13.5, color: COLOR.ink }}>{i} <span style={{ color: COLOR.inkSoft, fontSize: 11 }}>(nur diesmal)</span></span>
+        </div>
+      ))}
+      <div style={{ display: "flex", gap: 6, marginTop: 8, marginBottom: 6 }}>
+        <input
+          style={{ ...inputStyle, marginBottom: 0, flex: 1 }} value={newItem} onChange={(e) => setNewItem(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter") addAdHoc(); }}
+          placeholder="Weiterer Punkt nur für diesmal"
+        />
+        <button onClick={addAdHoc} style={btnGhost}>+</button>
+      </div>
+      <button onClick={onManage} style={{ background: "none", border: "none", color: COLOR.inkSoft, fontSize: 12, cursor: "pointer", padding: "6px 0", textAlign: "left" }}>
+        Feste Checkliste verwalten
+      </button>
+      <button
+        disabled={items.length === 0}
+        onClick={() => onSave({ season, date, items })}
+        style={{ ...btnPrimary, width: "100%", padding: "11px 0", marginTop: 10, opacity: items.length === 0 ? 0.5 : 1 }}
+      >Aufgaben erstellen</button>
+    </Modal>
+  );
+}
+
+function ManageMoveTemplateModal({ templates, onAdd, onDelete, onClose }) {
+  const modeBtn = { flex: 1, padding: "8px 0", borderRadius: 9, border: `1px solid ${COLOR.line}`, background: "#fff", fontSize: 13, fontWeight: 600, cursor: "pointer" };
+  const [season, setSeason] = useState("winter");
+  const [newText, setNewText] = useState("");
+  const items = templates.filter((t) => t.season === season);
+  return (
+    <Modal title="Feste Checkliste Stallwechsel" onClose={onClose}>
+      <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+        <button type="button" onClick={() => setSeason("winter")} style={{ ...modeBtn, ...(season === "winter" ? { background: "#F3ECDD", borderColor: COLOR.accent } : {}) }}>❄️ Winterstall</button>
+        <button type="button" onClick={() => setSeason("sommer")} style={{ ...modeBtn, ...(season === "sommer" ? { background: "#F3ECDD", borderColor: COLOR.accent } : {}) }}>☀️ Sommerstall</button>
+      </div>
+      {items.map((t) => (
+        <div key={t.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 0", borderBottom: `1px solid ${COLOR.line}` }}>
+          <span style={{ fontSize: 13.5, color: COLOR.ink }}>{t.item_text}</span>
+          <button onClick={() => onDelete(t.id)} style={{ background: "none", border: "none", cursor: "pointer", color: COLOR.inkSoft }}>
+            <Trash2 size={14} />
+          </button>
+        </div>
+      ))}
+      <div style={{ display: "flex", gap: 6, marginTop: 14 }}>
+        <input
+          style={{ ...inputStyle, marginBottom: 0, flex: 1 }} value={newText} onChange={(e) => setNewText(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter") { onAdd(season, newText); setNewText(""); } }}
+          placeholder="Neuer fester Punkt"
+        />
+        <button onClick={() => { onAdd(season, newText); setNewText(""); }} style={btnPrimary}>+ Hinzufügen</button>
+      </div>
+    </Modal>
   );
 }
 

@@ -630,6 +630,24 @@ alter table standing_orders enable row level security;
 drop policy if exists "standing_orders_all" on standing_orders;
 create policy "standing_orders_all" on standing_orders for all using (auth.role() = 'authenticated') with check (auth.role() = 'authenticated');
 
+-- Feste Checkliste für den jährlich wiederkehrenden Stallwechsel (Sommer-/Winterstall) –
+-- einmal eingetragen, jedes Jahr wieder nutzbar (statt jedes Mal neu überlegen zu müssen).
+create table if not exists move_checklist_templates (
+  id uuid primary key default gen_random_uuid(),
+  season text not null, -- sommer | winter
+  item_text text not null,
+  order_index int not null default 0,
+  created_at timestamptz default now(),
+  unique (season, item_text)
+);
+insert into move_checklist_templates (season, item_text, order_index) values
+  ('winter', 'Eicheln wegmachen', 1),
+  ('sommer', 'Wasserfässer umdrehen (gegen Ertrinken von Tieren)', 1)
+on conflict (season, item_text) do nothing;
+alter table move_checklist_templates enable row level security;
+drop policy if exists "move_checklist_templates_all" on move_checklist_templates;
+create policy "move_checklist_templates_all" on move_checklist_templates for all using (auth.role() = 'authenticated') with check (auth.role() = 'authenticated');
+
 -- Regelmäßige Abwesenheiten (z.B. "Tanja ist immer freitags nicht da") – erzeugt
 -- automatisch die passenden Betreuungsaufgaben für die kommenden Tage.
 create table if not exists recurring_absences (
@@ -721,9 +739,15 @@ create table if not exists renovation_projects (
   sketch_url text,
   days numeric default 0, -- eigene grobe Zeitschätzung in Tagen
   depends_on uuid[] not null default '{}', -- IDs anderer renovation_projects
+  season text not null default 'egal', -- egal | sommer | winter
+  category text not null default 'umbau', -- umbau | aufraeumen
   order_index int not null default 0,
+  parent_id uuid references renovation_projects(id) on delete cascade, -- für Teilprojekte eines Überprojekts
   created_at timestamptz default now()
 );
+alter table renovation_projects add column if not exists season text not null default 'egal';
+alter table renovation_projects add column if not exists parent_id uuid references renovation_projects(id) on delete cascade;
+alter table renovation_projects add column if not exists category text not null default 'umbau';
 create table if not exists renovation_links (
   id uuid primary key default gen_random_uuid(),
   project_id uuid not null references renovation_projects(id) on delete cascade,

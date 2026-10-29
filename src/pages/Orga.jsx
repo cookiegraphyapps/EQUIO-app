@@ -1,10 +1,9 @@
 import { useNavigate } from "react-router-dom";
-import { ChevronLeft } from "lucide-react";
-import { COLOR, SectionTitle } from "../components/ui";
+import { ChevronLeft, Hammer, ChevronRight } from "lucide-react";
+import { Card, COLOR, SectionTitle } from "../components/ui";
 import AnweideplanSection from "../components/Anweideplan";
 import DienstleisterSection from "../components/Dienstleister";
 import HeuSection from "../components/Heu";
-import StallumbauSection from "../components/Stallumbau";
 
 export default function Orga({ user, isAdmin }) {
   const navigate = useNavigate();
@@ -21,11 +20,17 @@ export default function Orga({ user, isAdmin }) {
       <div style={{ marginTop: 8 }}>
         <HeuSection isAdmin={isAdmin} />
       </div>
+
+      <Card onClick={() => navigate("/orga/stallumbau")} style={{ marginTop: 8, marginBottom: 8, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <Hammer size={16} color={COLOR.accent} />
+          <span style={{ fontSize: 14, fontWeight: 700, color: COLOR.ink }}>Stallprojekte</span>
+        </div>
+        <ChevronRight size={16} color={COLOR.inkSoft} />
+      </Card>
+
       <div style={{ marginTop: 8 }}>
         <DienstleisterSection user={user} isAdmin={isAdmin} />
-      </div>
-      <div style={{ marginTop: 8 }}>
-        <StallumbauSection isAdmin={isAdmin} />
       </div>
     </div>
   );

@@ -9,6 +9,15 @@ const STATUS = {
   in_arbeit: { label: "In Arbeit", bg: COLOR.uebernommenBg, fg: COLOR.uebernommen },
   fertig: { label: "Fertig", bg: COLOR.erledigtBg, fg: COLOR.erledigt },
 };
+const SEASON = {
+  egal: { label: "Egal wann", icon: "🔁" },
+  sommer: { label: "Nur Sommer", icon: "☀️" },
+  winter: { label: "Nur Winter", icon: "❄️" },
+};
+const CATEGORY = {
+  umbau: { label: "Umbauprojekte", icon: "🔨" },
+  aufraeumen: { label: "Verschönerungsprojekte", icon: "🧹" },
+};
 
 // Rechnet die effektive Wartezeit eines Projekts: eigene Tage + Tage aller noch nicht
 // fertigen Abhängigkeiten (rekursiv, mit Zyklenschutz).
@@ -37,16 +46,18 @@ export default function StallumbauSection({ isAdmin }) {
   useEffect(() => { load(); }, []);
 
   const addProject = async (data) => {
-    const maxOrder = Math.max(0, ...projects.map((p) => p.order_index));
-    await supabase.from("renovation_projects").insert({ title: data.title, order_index: maxOrder + 1 });
+    const siblings = projects.filter((p) => (p.parent_id || null) === (data.parentId || null));
+    const maxOrder = Math.max(0, ...siblings.map((p) => p.order_index));
+    await supabase.from("renovation_projects").insert({ title: data.title, order_index: maxOrder + 1, parent_id: data.parentId || null });
     setShowNew(false);
     load();
   };
 
-  const move = async (i, dir) => {
+  // Sortiert nur innerhalb derselben Geschwister-Ebene (gleiches Überprojekt bzw. beide Top-Level).
+  const move = async (list, i, dir) => {
     const j = i + dir;
-    if (j < 0 || j >= projects.length) return;
-    const a = projects[i], b = projects[j];
+    if (j < 0 || j >= list.length) return;
+    const a = list[i], b = list[j];
     await Promise.all([
       supabase.from("renovation_projects").update({ order_index: b.order_index }).eq("id", a.id),
       supabase.from("renovation_projects").update({ order_index: a.order_index }).eq("id", b.id),
@@ -62,22 +73,27 @@ export default function StallumbauSection({ isAdmin }) {
     return (
       <ProjectDetail
         project={project} allProjects={projects} isAdmin={isAdmin}
-        onBack={() => setOpenId(null)} onChanged={load}
-        onDelete={async () => { await supabase.from("renovation_projects").delete().eq("id", project.id); setOpenId(null); load(); }}
+        onBack={() => setOpenId(project.parent_id || null)} onOpen={setOpenId} onChanged={load}
+        onAddChild={(data) => addProject({ ...data, parentId: project.id })}
+        onMoveChild={move}
+        onDelete={async () => { await supabase.from("renovation_projects").delete().eq("id", project.id); setOpenId(project.parent_id || null); load(); }}
       />
     );
   }
 
+  const topLevel = projects.filter((p) => !p.parent_id);
+
   return (
     <div>
       <SectionTitle right={<IconBtn onClick={() => setShowNew(true)}><Plus size={15} /> Projekt</IconBtn>}>
-        <Hammer size={15} style={{ marginRight: 5, verticalAlign: -2 }} />Stallumbau
+        <Hammer size={15} style={{ marginRight: 5, verticalAlign: -2 }} />Stallprojekte
       </SectionTitle>
-      {projects.length === 0 && <Empty text="Noch keine Projekte." />}
-      {projects.map((p, i) => {
+      {topLevel.length === 0 && <Empty text="Noch keine Projekte." />}
+      {topLevel.map((p, i) => {
         const blockedBy = (p.depends_on || []).map((id) => projects.find((x) => x.id === id)).filter((d) => d && d.status !== "fertig");
         const days = effectiveDays(p, projects);
         const statusInfo = STATUS[p.status] || STATUS.idee;
+        const childCount = projects.filter((x) => x.parent_id === p.id).length;
         return (
           <Card key={p.id} style={{ marginBottom: 8 }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
@@ -85,7 +101,10 @@ export default function StallumbauSection({ isAdmin }) {
                 <div style={{ fontWeight: 700, fontSize: 14, color: COLOR.ink }}>{p.title}</div>
                 <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 4, flexWrap: "wrap" }}>
                   <Pill bg={statusInfo.bg} fg={statusInfo.fg}>{statusInfo.label}</Pill>
+                  <span style={{ fontSize: 11.5, color: COLOR.inkSoft }}>{CATEGORY[p.category]?.icon} {CATEGORY[p.category]?.label}</span>
+                  {p.season !== "egal" && <span style={{ fontSize: 11.5, color: COLOR.inkSoft }}>{SEASON[p.season]?.icon} {SEASON[p.season]?.label}</span>}
                   {days > 0 && <span style={{ fontSize: 11.5, color: COLOR.inkSoft }}>~{days} Tg. gesamt</span>}
+                  {childCount > 0 && <span style={{ fontSize: 11.5, color: COLOR.inkSoft }}>· {childCount} Teilprojekt{childCount === 1 ? "" : "e"}</span>}
                 </div>
                 {blockedBy.length > 0 && (
                   <div style={{ fontSize: 11.5, color: COLOR.dringend, marginTop: 4, display: "flex", alignItems: "center", gap: 4 }}>
@@ -94,8 +113,8 @@ export default function StallumbauSection({ isAdmin }) {
                 )}
               </div>
               <div style={{ display: "flex", flexDirection: "column" }}>
-                <button onClick={() => move(i, -1)} disabled={i === 0} style={{ background: "none", border: "none", cursor: i === 0 ? "default" : "pointer", opacity: i === 0 ? 0.3 : 1, padding: 0 }}><ChevronUp size={14} /></button>
-                <button onClick={() => move(i, 1)} disabled={i === projects.length - 1} style={{ background: "none", border: "none", cursor: i === projects.length - 1 ? "default" : "pointer", opacity: i === projects.length - 1 ? 0.3 : 1, padding: 0 }}><ChevronDown size={14} /></button>
+                <button onClick={() => move(topLevel, i, -1)} disabled={i === 0} style={{ background: "none", border: "none", cursor: i === 0 ? "default" : "pointer", opacity: i === 0 ? 0.3 : 1, padding: 0 }}><ChevronUp size={14} /></button>
+                <button onClick={() => move(topLevel, i, 1)} disabled={i === topLevel.length - 1} style={{ background: "none", border: "none", cursor: i === topLevel.length - 1 ? "default" : "pointer", opacity: i === topLevel.length - 1 ? 0.3 : 1, padding: 0 }}><ChevronDown size={14} /></button>
               </div>
             </div>
           </Card>
@@ -117,12 +136,17 @@ function NewProjectModal({ onClose, onSave }) {
   );
 }
 
-function ProjectDetail({ project, allProjects, isAdmin, onBack, onChanged, onDelete }) {
+function ProjectDetail({ project, allProjects, isAdmin, onBack, onOpen, onAddChild, onMoveChild, onChanged, onDelete }) {
   const [editing, setEditing] = useState(false);
+  const [showNewChild, setShowNewChild] = useState(false);
+  const children = allProjects.filter((p) => p.parent_id === project.id);
+  const parentProject = project.parent_id ? allProjects.find((p) => p.id === project.parent_id) : null;
   const [title, setTitle] = useState(project.title);
   const [status, setStatus] = useState(project.status);
   const [description, setDescription] = useState(project.description || "");
   const [days, setDays] = useState(project.days || "");
+  const [season, setSeason] = useState(project.season || "egal");
+  const [category, setCategory] = useState(project.category || "umbau");
   const [dependsOn, setDependsOn] = useState(project.depends_on || []);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [links, setLinks] = useState([]);
@@ -162,7 +186,7 @@ function ProjectDetail({ project, allProjects, isAdmin, onBack, onChanged, onDel
 
   const save = async () => {
     await supabase.from("renovation_projects").update({
-      title: title.trim(), status, description: description.trim() || null, days: days ? Number(days) : 0, depends_on: dependsOn,
+      title: title.trim(), status, description: description.trim() || null, days: days ? Number(days) : 0, depends_on: dependsOn, season, category,
     }).eq("id", project.id);
     setEditing(false);
     onChanged();
@@ -201,7 +225,7 @@ function ProjectDetail({ project, allProjects, isAdmin, onBack, onChanged, onDel
   return (
     <div>
       <button onClick={onBack} style={{ background: "none", border: "none", cursor: "pointer", color: COLOR.inkSoft, display: "flex", alignItems: "center", gap: 4, padding: "8px 0", fontSize: 13 }}>
-        <ChevronLeft size={15} /> Stallumbau
+        <ChevronLeft size={15} /> {parentProject ? parentProject.title : "Stallprojekte"}
       </button>
 
       {editing ? (
@@ -215,6 +239,24 @@ function ProjectDetail({ project, allProjects, isAdmin, onBack, onChanged, onDel
                 padding: "6px 11px", borderRadius: 999, border: `1px solid ${status === key ? COLOR.accent : COLOR.line}`,
                 background: status === key ? "#F3ECDD" : "#fff", fontSize: 12.5, cursor: "pointer", color: COLOR.ink,
               }}>{v.label}</button>
+            ))}
+          </div>
+          <label style={labelStyle}>Art des Projekts</label>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 12 }}>
+            {Object.entries(CATEGORY).map(([key, v]) => (
+              <button key={key} type="button" onClick={() => setCategory(key)} style={{
+                padding: "6px 11px", borderRadius: 999, border: `1px solid ${category === key ? COLOR.accent : COLOR.line}`,
+                background: category === key ? "#F3ECDD" : "#fff", fontSize: 12.5, cursor: "pointer", color: COLOR.ink,
+              }}>{v.icon} {v.label}</button>
+            ))}
+          </div>
+          <label style={labelStyle}>Wann machbar?</label>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 12 }}>
+            {Object.entries(SEASON).map(([key, v]) => (
+              <button key={key} type="button" onClick={() => setSeason(key)} style={{
+                padding: "6px 11px", borderRadius: 999, border: `1px solid ${season === key ? COLOR.accent : COLOR.line}`,
+                background: season === key ? "#F3ECDD" : "#fff", fontSize: 12.5, cursor: "pointer", color: COLOR.ink,
+              }}>{v.icon} {v.label}</button>
             ))}
           </div>
           <label style={labelStyle}>Grobe Planung</label>
@@ -245,8 +287,10 @@ function ProjectDetail({ project, allProjects, isAdmin, onBack, onChanged, onDel
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
             <div>
               <div style={{ fontFamily: "Fraunces, serif", fontSize: 19, fontWeight: 700, color: COLOR.ink }}>{project.title}</div>
-              <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 4 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 4, flexWrap: "wrap" }}>
                 <Pill bg={STATUS[project.status]?.bg} fg={STATUS[project.status]?.fg}>{STATUS[project.status]?.label}</Pill>
+                <span style={{ fontSize: 12, color: COLOR.inkSoft }}>{CATEGORY[project.category]?.icon} {CATEGORY[project.category]?.label}</span>
+                {project.season !== "egal" && <span style={{ fontSize: 12, color: COLOR.inkSoft }}>{SEASON[project.season]?.icon} {SEASON[project.season]?.label}</span>}
                 {days_total > 0 && <span style={{ fontSize: 12, color: COLOR.inkSoft }}>~{days_total} Tg. gesamt (inkl. Abhängigkeiten)</span>}
               </div>
               {project.description && <div style={{ fontSize: 13, color: COLOR.ink, marginTop: 8, whiteSpace: "pre-wrap" }}>{project.description}</div>}
@@ -259,6 +303,29 @@ function ProjectDetail({ project, allProjects, isAdmin, onBack, onChanged, onDel
             <button onClick={() => setEditing(true)} style={{ background: "none", border: "none", cursor: "pointer", color: COLOR.inkSoft }}>✏️</button>
           </div>
         </Card>
+      )}
+
+      <SectionTitle right={<IconBtn onClick={() => setShowNewChild(true)}><Plus size={14} /> Teilprojekt</IconBtn>}>Teilprojekte</SectionTitle>
+      {children.length === 0 && <Empty text="Noch keine Teilprojekte." />}
+      {children.map((c, i) => {
+        const statusInfo = STATUS[c.status] || STATUS.idee;
+        return (
+          <Card key={c.id} style={{ marginBottom: 8 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+              <div onClick={() => onOpen(c.id)} style={{ cursor: "pointer", flex: 1 }}>
+                <div style={{ fontWeight: 700, fontSize: 13.5, color: COLOR.ink }}>{c.title}</div>
+                <div style={{ marginTop: 3 }}><Pill bg={statusInfo.bg} fg={statusInfo.fg}>{statusInfo.label}</Pill></div>
+              </div>
+              <div style={{ display: "flex", flexDirection: "column" }}>
+                <button onClick={() => onMoveChild(children, i, -1)} disabled={i === 0} style={{ background: "none", border: "none", cursor: i === 0 ? "default" : "pointer", opacity: i === 0 ? 0.3 : 1, padding: 0 }}><ChevronUp size={13} /></button>
+                <button onClick={() => onMoveChild(children, i, 1)} disabled={i === children.length - 1} style={{ background: "none", border: "none", cursor: i === children.length - 1 ? "default" : "pointer", opacity: i === children.length - 1 ? 0.3 : 1, padding: 0 }}><ChevronDown size={13} /></button>
+              </div>
+            </div>
+          </Card>
+        );
+      })}
+      {showNewChild && (
+        <NewProjectModal onClose={() => setShowNewChild(false)} onSave={(data) => { onAddChild(data); setShowNewChild(false); }} />
       )}
 
       <SectionTitle>Skizze</SectionTitle>
