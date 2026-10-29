@@ -711,6 +711,51 @@ create policy "rain_intensity_thresholds_all" on rain_intensity_thresholds for a
 create policy "blanket_settings_select" on blanket_settings for select using (auth.role() = 'authenticated');
 create policy "blanket_settings_update" on blanket_settings for update using (auth.role() = 'authenticated');
 
+-- Stallumbau: Projekte mit grober Planung, Skizze, Links, Einkaufsliste und
+-- Abhängigkeiten zu anderen Projekten (für die "braucht erst Projekt X"-Logik).
+create table if not exists renovation_projects (
+  id uuid primary key default gen_random_uuid(),
+  title text not null,
+  status text not null default 'idee', -- idee | geplant | in_arbeit | fertig
+  description text,
+  sketch_url text,
+  days numeric default 0, -- eigene grobe Zeitschätzung in Tagen
+  depends_on uuid[] not null default '{}', -- IDs anderer renovation_projects
+  order_index int not null default 0,
+  created_at timestamptz default now()
+);
+create table if not exists renovation_links (
+  id uuid primary key default gen_random_uuid(),
+  project_id uuid not null references renovation_projects(id) on delete cascade,
+  url text not null,
+  note text,
+  created_at timestamptz default now()
+);
+create table if not exists renovation_shopping_items (
+  id uuid primary key default gen_random_uuid(),
+  project_id uuid not null references renovation_projects(id) on delete cascade,
+  text text not null,
+  estimated_price numeric,
+  bought boolean not null default false,
+  created_at timestamptz default now()
+);
+alter table renovation_projects enable row level security;
+alter table renovation_links enable row level security;
+alter table renovation_shopping_items enable row level security;
+drop policy if exists "renovation_projects_select" on renovation_projects;
+drop policy if exists "renovation_projects_insert" on renovation_projects;
+drop policy if exists "renovation_projects_update" on renovation_projects;
+drop policy if exists "renovation_projects_delete_admin" on renovation_projects;
+drop policy if exists "renovation_links_all" on renovation_links;
+drop policy if exists "renovation_shopping_items_all" on renovation_shopping_items;
+create policy "renovation_projects_select" on renovation_projects for select using (auth.role() = 'authenticated');
+create policy "renovation_projects_insert" on renovation_projects for insert with check (auth.role() = 'authenticated');
+create policy "renovation_projects_update" on renovation_projects for update using (auth.role() = 'authenticated');
+create policy "renovation_projects_delete_admin" on renovation_projects for delete
+  using (exists (select 1 from profiles p2 where p2.id = auth.uid() and p2.is_admin = true));
+create policy "renovation_links_all" on renovation_links for all using (auth.role() = 'authenticated') with check (auth.role() = 'authenticated');
+create policy "renovation_shopping_items_all" on renovation_shopping_items for all using (auth.role() = 'authenticated') with check (auth.role() = 'authenticated');
+
 -- Heu-Verbrauch: Ballenanzahl + Zeitraum (wie lange gehalten) + beteiligte Pferde,
 -- damit sich der Verbrauch für Winter- (Sep-Apr) und Sommermonate hochrechnen lässt.
 create table if not exists hay_batches (

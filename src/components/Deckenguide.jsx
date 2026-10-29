@@ -26,55 +26,110 @@ function nowIndex(hourly) {
   if (idx === -1) idx = Math.max(0, hourly.time.length - 25); // Fallback
   return idx;
 }
+const localHour = (timeStr) => Number(timeStr.slice(11, 13));
 
-// Berechnet die Deckenempfehlung nach den hinterlegten Regeln. Da Wetterdaten nur
-// stündlich vorliegen, wird eine Regen-Stunde (>= 0,2mm) pauschal mit 60 Minuten
-// gewertet statt minutengenau nachverfolgt – eine bewusste Annäherung.
-function computeRecommendation(hourly, profile, settings) {
+// Findet den nächsten zusammenhängenden Tag- (7-19 Uhr) oder Nacht-Block (19-7 Uhr),
+// gesucht ab dem Index fromIdx. Bei Tagesstart um Mitternacht ist "jetzt" oft schon
+// mitten im aktuellen Block, dann wird nur der Rest davon zurückgegeben.
+function findWindow(hourly, fromIdx, isWindowHour) {
+  let start = -1;
+  for (let i = fromIdx; i < hourly.time.length; i++) {
+    if (isWindowHour(localHour(hourly.time[i]))) { start = i; break; }
+  }
+  if (start === -1) return null;
+  let end = start;
+  for (let i = start; i < hourly.time.length; i++) {
+    if (isWindowHour(localHour(hourly.time[i]))) end = i; else break;
+  }
+  return [start, end];
+}
+const isDayHour = (h) => h >= 7 && h < 19;
+const isNightHour = (h) => h >= 19 || h < 7;
+
+// Findet den Beginn eines ANHALTENDEN Kälteeinbruchs: die erste Stunde, ab der die
+// Temperatur mindestens hoursNeeded Stunden am Stück auf/unter threshold bleibt. Eine
+// einzelne kalte/nasse Stunde zwischen sonst warmen Stunden zählt bewusst NICHT –
+// nur ein wirklich anhaltender Einbruch soll die Empfehlung auslösen.
+function sustainedColdOnset(temps, start, end, threshold, hoursNeeded) {
+  let runStart = null, runLen = 0;
+  for (let i = start; i <= end; i++) {
+    if (temps[i] !== undefined && temps[i] <= threshold) {
+      if (runStart === null) runStart = i;
+      runLen++;
+      if (runLen >= hoursNeeded) {
+        let minTemp = Infinity;
+        for (let j = runStart; j <= end; j++) if (temps[j] !== undefined && temps[j] < minTemp) minTemp = temps[j];
+        return { onsetIdx: runStart, minTemp };
+      }
+    } else {
+      runStart = null; runLen = 0;
+    }
+  }
+  return null;
+}
+
+// Berechnet die Deckenempfehlung für ein Zeitfenster (z.B. "heute tagsüber" oder
+// "kommende Nacht") nach den hinterlegten Regeln. Eine Empfehlung entsteht nur bei
+// einem anhaltenden Kälte-/Nässeeinbruch, nicht bei einer einzelnen Ausreißer-Stunde.
+// Da Wetterdaten nur stündlich vorliegen, wird eine Regen-Stunde (>= 0,2mm) pauschal mit
+// 60 Minuten gewertet statt minutengenau nachverfolgt.
+function computeWindowRecommendation(hourly, profile, settings, start, end) {
   const temps = hourly.temperature_2m;
   const precip = hourly.precipitation;
   const wind = hourly.wind_speed_10m;
-  const idx = nowIndex(hourly);
-  const currentTemp = temps[idx];
 
-  const winStart = Math.max(0, idx - 3);
-  const winEnd = Math.min(temps.length - 1, idx + 9);
+  let windowMin = Infinity;
+  for (let i = start; i <= end; i++) if (temps[i] !== undefined && temps[i] < windowMin) windowMin = temps[i];
+
   let qualifyingMinutes = 0, maxRate = 0, maxWind = 0;
-  for (let i = winStart; i <= winEnd; i++) {
+  for (let i = start; i <= end; i++) {
     const rate = precip[i] || 0;
     if (rate >= 0.2) { qualifyingMinutes += 60; if (rate > maxRate) maxRate = rate; }
     if ((wind[i] || 0) > maxWind) maxWind = wind[i];
   }
   const rainQualifies = qualifyingMinutes >= settings.rain_qualify_total_minutes;
 
-  let stage;
-  if (currentTemp > profile.rain_upper && currentTemp > profile.dry_upper) {
-    stage = "none";
-  } else if (rainQualifies) {
-    stage = currentTemp > profile.rain_upper ? "none" : currentTemp > profile.rain_lower ? "light" : "heavy";
-  } else {
-    const hoursNeeded = Math.ceil(profile.min_cold_duration_hours);
-    const checkStart = Math.max(0, idx - hoursNeeded);
-    let coldEnough = currentTemp <= profile.dry_upper;
-    for (let i = checkStart; i <= idx; i++) {
-      if (temps[i] !== undefined && temps[i] > profile.dry_upper) { coldEnough = false; break; }
-    }
-    stage = !coldEnough ? "none" : currentTemp > profile.dry_lower ? "light" : "heavy";
+  const hoursNeeded = Math.ceil(profile.min_cold_duration_hours);
+  const upperThreshold = rainQualifies ? profile.rain_upper : profile.dry_upper;
+  const lowerThreshold = rainQualifies ? profile.rain_lower : profile.dry_lower;
+  const sustained = sustainedColdOnset(temps, start, end, upperThreshold, hoursNeeded);
+  const currentTemp = sustained ? sustained.minTemp : windowMin;
+
+  let stage = "none", onsetTime = null;
+  if (sustained && currentTemp <= 10) {
+    stage = currentTemp > lowerThreshold ? "light" : "heavy";
+    onsetTime = hourly.time[sustained.onsetIdx];
   }
 
-  if (settings.wind_enabled && currentTemp <= 10) {
+  if (stage !== "none" && settings.wind_enabled) {
     if (maxWind > settings.wind_high_kmh) stage = bumpStage(stage);
     else if (maxWind >= settings.wind_mid_kmh && rainQualifies) stage = bumpStage(stage);
   }
 
-  if (profile.night_rule_enabled && maxRate > profile.night_rain_rate && qualifyingMinutes > profile.night_rain_duration_min && currentTemp <= profile.night_temp_cap) {
-    const nightStage = currentTemp > profile.rain_lower ? "light" : "heavy";
-    if (stageRank(nightStage) > stageRank(stage)) stage = nightStage;
+  if (profile.night_rule_enabled && maxRate > profile.night_rain_rate && qualifyingMinutes > profile.night_rain_duration_min && windowMin <= profile.night_temp_cap) {
+    const nightStage = windowMin > profile.rain_lower ? "light" : "heavy";
+    if (stageRank(nightStage) > stageRank(stage)) { stage = nightStage; if (!onsetTime) onsetTime = hourly.time[start]; }
   }
 
   if (currentTemp > 10) stage = "none"; // feste Obergrenze, unabhängig von allem anderen
 
-  return { stage, currentTemp, qualifyingMinutes, maxRate, maxWind, rainQualifies };
+  return { stage, currentTemp, qualifyingMinutes, maxRate, maxWind, rainQualifies, onsetTime };
+}
+
+function computeRecommendation(hourly, profile, settings) {
+  const idx = nowIndex(hourly);
+  const currentlyDay = isDayHour(localHour(hourly.time[idx]));
+  let dayWindow, nightWindow;
+  if (currentlyDay) {
+    dayWindow = findWindow(hourly, idx, isDayHour); // Rest von heute
+    nightWindow = findWindow(hourly, dayWindow ? dayWindow[1] + 1 : idx, isNightHour); // kommende Nacht
+  } else {
+    nightWindow = findWindow(hourly, idx, isNightHour); // Rest von heute Nacht
+    dayWindow = findWindow(hourly, nightWindow ? nightWindow[1] + 1 : idx, isDayHour); // morgiger Tag
+  }
+  const day = dayWindow ? computeWindowRecommendation(hourly, profile, settings, dayWindow[0], dayWindow[1]) : null;
+  const night = nightWindow ? computeWindowRecommendation(hourly, profile, settings, nightWindow[0], nightWindow[1]) : null;
+  return { day, night };
 }
 
 export function BlanketCard({ horse, isAdmin, onProfileChange }) {
@@ -126,23 +181,33 @@ export function BlanketCard({ horse, isAdmin, onProfileChange }) {
     </Card>
   );
 
-  const stageInfo = STAGE_INFO[result.stage];
   const currentProfile = profiles.find((p) => p.key === (horse.blanket_profile || "normal"));
+
+  const Period = ({ label, icon, data }) => {
+    if (!data) return null;
+    const info = STAGE_INFO[data.stage];
+    return (
+      <div style={{ flex: 1 }}>
+        <div style={{ fontSize: 11.5, color: COLOR.inkSoft, marginBottom: 4 }}>{icon} {label}</div>
+        <span style={{ background: info.bg, color: info.fg, borderRadius: 999, padding: "4px 11px", fontSize: 13, fontWeight: 700, display: "inline-block" }}>
+          {info.label}
+        </span>
+        <div style={{ fontSize: 11.5, color: COLOR.inkSoft, marginTop: 3 }}>{data.currentTemp.toFixed(1)}°C{data.rainQualifies ? " · Regen" : ""}</div>
+        {data.onsetTime && (
+          <div style={{ fontSize: 11.5, color: COLOR.dringend, marginTop: 2, fontWeight: 600 }}>
+            ab ca. {data.onsetTime.slice(11, 16)} Uhr eindecken
+          </div>
+        )}
+      </div>
+    );
+  };
 
   return (
     <Card style={{ marginBottom: 10, background: "#F3ECDD" }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-        <div>
-          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-            <Shirt size={15} color={COLOR.accent} />
-            <span style={{ fontSize: 13, fontWeight: 700, color: COLOR.ink }}>Deckenempfehlung</span>
-          </div>
-          <div style={{ marginTop: 6, display: "flex", alignItems: "center", gap: 8 }}>
-            <span style={{ background: stageInfo.bg, color: stageInfo.fg, borderRadius: 999, padding: "4px 11px", fontSize: 13, fontWeight: 700 }}>
-              {stageInfo.label} ({stageInfo.g})
-            </span>
-            <span style={{ fontSize: 12.5, color: COLOR.inkSoft }}>{result.currentTemp.toFixed(1)}°C</span>
-          </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          <Shirt size={15} color={COLOR.accent} />
+          <span style={{ fontSize: 13, fontWeight: 700, color: COLOR.ink }}>Deckenempfehlung</span>
         </div>
         {isAdmin && (
           <button onClick={() => setShowSettings(true)} style={{ background: "none", border: "none", cursor: "pointer", color: COLOR.inkSoft }}>
@@ -151,7 +216,12 @@ export function BlanketCard({ horse, isAdmin, onProfileChange }) {
         )}
       </div>
 
-      <div style={{ marginTop: 10 }}>
+      <div style={{ display: "flex", gap: 16, marginTop: 10 }}>
+        <Period label="Tag" icon="☀️" data={result.day} />
+        <Period label="Nacht" icon="🌙" data={result.night} />
+      </div>
+
+      <div style={{ marginTop: 12 }}>
         <label style={{ ...labelStyle, marginBottom: 4 }}>Profil</label>
         <div style={{ display: "flex", gap: 6 }}>
           {profiles.map((p) => (
@@ -171,9 +241,10 @@ export function BlanketCard({ horse, isAdmin, onProfileChange }) {
       </button>
       {showDetails && (
         <div style={{ fontSize: 11.5, color: COLOR.inkSoft, marginTop: 4, lineHeight: 1.6 }}>
-          Regen (ca. nächste/letzte Stunden): {result.rainQualifies ? `${result.qualifyingMinutes} Min. relevant` : "nicht ausreichend für Regen-Regel"}, max. Rate {result.maxRate.toFixed(1)}mm/h, max. Wind {result.maxWind.toFixed(0)}km/h.
+          {result.day && <>Tag: {result.day.rainQualifies ? `${result.day.qualifyingMinutes} Min. Regen relevant` : "kein relevanter Regen"}, max. {result.day.maxRate.toFixed(1)}mm/h, Wind bis {result.day.maxWind.toFixed(0)}km/h.<br /></>}
+          {result.night && <>Nacht: {result.night.rainQualifies ? `${result.night.qualifyingMinutes} Min. Regen relevant` : "kein relevanter Regen"}, max. {result.night.maxRate.toFixed(1)}mm/h, Wind bis {result.night.maxWind.toFixed(0)}km/h.<br /></>}
           Profil: {currentProfile?.label}. Trocken: &gt;{currentProfile?.dry_upper}°C keine, &gt;{currentProfile?.dry_lower}°C leicht, sonst dick (mind. {currentProfile?.min_cold_duration_hours}h am Stück). Nass: &gt;{currentProfile?.rain_upper}°C keine, &gt;{currentProfile?.rain_lower}°C leicht, sonst dick.
-          Näherung: stündliche Wetterdaten, keine Minutengenauigkeit.
+          Näherung: stündliche Wetterdaten, keine Minutengenauigkeit. Eine Empfehlung entsteht nur bei einem anhaltenden Einbruch (mind. {currentProfile?.min_cold_duration_hours}h am Stück) – einzelne kalte/nasse Ausreißerstunden zwischen sonst warmen lösen nichts aus. „Ab wann eindecken" markiert den Beginn dieses anhaltenden Einbruchs.
         </div>
       )}
 

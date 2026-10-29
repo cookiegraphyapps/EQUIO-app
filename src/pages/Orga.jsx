@@ -4,6 +4,7 @@ import { COLOR, SectionTitle } from "../components/ui";
 import AnweideplanSection from "../components/Anweideplan";
 import DienstleisterSection from "../components/Dienstleister";
 import HeuSection from "../components/Heu";
+import StallumbauSection from "../components/Stallumbau";
 
 export default function Orga({ user, isAdmin }) {
   const navigate = useNavigate();
@@ -22,6 +23,9 @@ export default function Orga({ user, isAdmin }) {
       </div>
       <div style={{ marginTop: 8 }}>
         <DienstleisterSection user={user} isAdmin={isAdmin} />
+      </div>
+      <div style={{ marginTop: 8 }}>
+        <StallumbauSection isAdmin={isAdmin} />
       </div>
     </div>
   );
