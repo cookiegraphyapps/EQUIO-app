@@ -10,6 +10,7 @@ import Kalender from "./pages/Kalender";
 import Pferde from "./pages/Pferde";
 import Orga from "./pages/Orga";
 import OrgaStallumbau from "./pages/OrgaStallumbau";
+import OrgaFutter from "./pages/OrgaFutter";
 import Finanzen from "./pages/Finanzen";
 
 export default function App() {
@@ -91,6 +92,7 @@ function MainApp({ profile }) {
         <Route path="/finanzen" element={<Finanzen user={profile.name} isAdmin={profile.is_admin} />} />
         <Route path="/orga" element={<Orga user={profile.name} isAdmin={profile.is_admin} />} />
         <Route path="/orga/stallumbau" element={<OrgaStallumbau isAdmin={profile.is_admin} />} />
+        <Route path="/orga/futter" element={<OrgaFutter user={profile.name} isAdmin={profile.is_admin} />} />
       </Routes>
       <BottomNav />
     </div>

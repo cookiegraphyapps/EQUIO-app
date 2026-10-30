@@ -37,6 +37,10 @@ export default function StallumbauSection({ isAdmin }) {
   const [projects, setProjects] = useState([]);
   const [openId, setOpenId] = useState(null);
   const [showNew, setShowNew] = useState(false);
+  const [statusFilter, setStatusFilter] = useState("alle");
+  const [seasonFilter, setSeasonFilter] = useState("alle");
+  const [categoryFilter, setCategoryFilter] = useState("alle");
+  const [autoEditId, setAutoEditId] = useState(null);
 
   const load = async () => {
     const { data } = await supabase.from("renovation_projects").select("*").order("order_index");
@@ -45,12 +49,16 @@ export default function StallumbauSection({ isAdmin }) {
   };
   useEffect(() => { load(); }, []);
 
+  // Legt ein (Teil-)Projekt an und öffnet es direkt im Bearbeiten-Modus, damit alles
+  // gleich ausgefüllt werden kann (Status, Planung, Tage, Saison, Abhängigkeiten …).
   const addProject = async (data) => {
     const siblings = projects.filter((p) => (p.parent_id || null) === (data.parentId || null));
     const maxOrder = Math.max(0, ...siblings.map((p) => p.order_index));
-    await supabase.from("renovation_projects").insert({ title: data.title, order_index: maxOrder + 1, parent_id: data.parentId || null });
+    const { data: created } = await supabase.from("renovation_projects")
+      .insert({ title: data.title, order_index: maxOrder + 1, parent_id: data.parentId || null }).select().single();
     setShowNew(false);
-    load();
+    await load();
+    if (created) { setAutoEditId(created.id); setOpenId(created.id); }
   };
 
   // Sortiert nur innerhalb derselben Geschwister-Ebene (gleiches Überprojekt bzw. beide Top-Level).
@@ -72,6 +80,7 @@ export default function StallumbauSection({ isAdmin }) {
     if (!project) { setOpenId(null); return null; }
     return (
       <ProjectDetail
+        key={project.id} startEditing={autoEditId === project.id}
         project={project} allProjects={projects} isAdmin={isAdmin}
         onBack={() => setOpenId(project.parent_id || null)} onOpen={setOpenId} onChanged={load}
         onAddChild={(data) => addProject({ ...data, parentId: project.id })}
@@ -81,14 +90,45 @@ export default function StallumbauSection({ isAdmin }) {
     );
   }
 
-  const topLevel = projects.filter((p) => !p.parent_id);
+  const topLevelAll = projects.filter((p) => !p.parent_id);
+  const topLevel = topLevelAll.filter((p) =>
+    (statusFilter === "alle" || p.status === statusFilter) &&
+    (seasonFilter === "alle" || p.season === seasonFilter) &&
+    (categoryFilter === "alle" || p.category === categoryFilter)
+  );
+
+  const filterRow = (label, value, setValue, options) => (
+    <div style={{ marginBottom: 8 }}>
+      <div style={{ fontSize: 11, color: COLOR.inkSoft, marginBottom: 4 }}>{label}</div>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+        <button onClick={() => setValue("alle")} style={{
+          padding: "5px 11px", borderRadius: 999, border: `1px solid ${value === "alle" ? COLOR.accent : COLOR.line}`,
+          background: value === "alle" ? "#F3ECDD" : "#fff", fontSize: 12, cursor: "pointer", color: COLOR.ink,
+        }}>Alle</button>
+        {options.map(([key, v]) => (
+          <button key={key} onClick={() => setValue(key)} style={{
+            padding: "5px 11px", borderRadius: 999, border: `1px solid ${value === key ? COLOR.accent : COLOR.line}`,
+            background: value === key ? "#F3ECDD" : "#fff", fontSize: 12, cursor: "pointer", color: COLOR.ink,
+          }}>{v.icon || ""} {v.label}</button>
+        ))}
+      </div>
+    </div>
+  );
 
   return (
     <div>
       <SectionTitle right={<IconBtn onClick={() => setShowNew(true)}><Plus size={15} /> Projekt</IconBtn>}>
         <Hammer size={15} style={{ marginRight: 5, verticalAlign: -2 }} />Stallprojekte
       </SectionTitle>
-      {topLevel.length === 0 && <Empty text="Noch keine Projekte." />}
+      {topLevelAll.length > 0 && (
+        <div style={{ marginBottom: 12 }}>
+          {filterRow("Status", statusFilter, setStatusFilter, Object.entries(STATUS))}
+          {filterRow("Saison", seasonFilter, setSeasonFilter, Object.entries(SEASON))}
+          {filterRow("Art", categoryFilter, setCategoryFilter, Object.entries(CATEGORY))}
+        </div>
+      )}
+      {topLevelAll.length === 0 && <Empty text="Noch keine Projekte." />}
+      {topLevelAll.length > 0 && topLevel.length === 0 && <Empty text="Keine Projekte mit diesen Filtern." />}
       {topLevel.map((p, i) => {
         const blockedBy = (p.depends_on || []).map((id) => projects.find((x) => x.id === id)).filter((d) => d && d.status !== "fertig");
         const days = effectiveDays(p, projects);
@@ -136,8 +176,8 @@ function NewProjectModal({ onClose, onSave }) {
   );
 }
 
-function ProjectDetail({ project, allProjects, isAdmin, onBack, onOpen, onAddChild, onMoveChild, onChanged, onDelete }) {
-  const [editing, setEditing] = useState(false);
+function ProjectDetail({ project, allProjects, isAdmin, startEditing, onBack, onOpen, onAddChild, onMoveChild, onChanged, onDelete }) {
+  const [editing, setEditing] = useState(!!startEditing);
   const [showNewChild, setShowNewChild] = useState(false);
   const children = allProjects.filter((p) => p.parent_id === project.id);
   const parentProject = project.parent_id ? allProjects.find((p) => p.id === project.parent_id) : null;
@@ -151,19 +191,27 @@ function ProjectDetail({ project, allProjects, isAdmin, onBack, onOpen, onAddChi
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [links, setLinks] = useState([]);
   const [items, setItems] = useState([]);
+  const [todos, setTodos] = useState([]);
+  const [ideas, setIdeas] = useState([]);
+  const [newIdea, setNewIdea] = useState({ pro: "", kontra: "", idee: "" });
   const [newLinkUrl, setNewLinkUrl] = useState("");
   const [newLinkNote, setNewLinkNote] = useState("");
   const [newItemText, setNewItemText] = useState("");
   const [newItemPrice, setNewItemPrice] = useState("");
+  const [newTodoText, setNewTodoText] = useState("");
   const [uploading, setUploading] = useState(false);
 
   const loadSub = async () => {
-    const [linksRes, itemsRes] = await Promise.all([
+    const [linksRes, itemsRes, todosRes, ideasRes] = await Promise.all([
       supabase.from("renovation_links").select("*").eq("project_id", project.id).order("created_at"),
       supabase.from("renovation_shopping_items").select("*").eq("project_id", project.id).order("created_at"),
+      supabase.from("renovation_todos").select("*").eq("project_id", project.id).order("order_index"),
+      supabase.from("renovation_ideas").select("*").eq("project_id", project.id).order("created_at"),
     ]);
     setLinks(linksRes.data ?? []);
     setItems(itemsRes.data ?? []);
+    setTodos(todosRes.data ?? []);
+    setIdeas(ideasRes.data ?? []);
   };
   useEffect(() => { loadSub(); }, [project.id]);
 
@@ -218,6 +266,25 @@ function ProjectDetail({ project, allProjects, isAdmin, onBack, onOpen, onAddChi
   };
   const toggleItem = async (it) => { await supabase.from("renovation_shopping_items").update({ bought: !it.bought }).eq("id", it.id); loadSub(); };
   const deleteItem = async (id) => { await supabase.from("renovation_shopping_items").delete().eq("id", id); loadSub(); };
+
+  const addIdea = async (kind) => {
+    const text = (newIdea[kind] || "").trim();
+    if (!text) return;
+    await supabase.from("renovation_ideas").insert({ project_id: project.id, kind, text });
+    setNewIdea((n) => ({ ...n, [kind]: "" }));
+    loadSub();
+  };
+  const deleteIdea = async (id) => { await supabase.from("renovation_ideas").delete().eq("id", id); loadSub(); };
+
+  const addTodo = async () => {
+    if (!newTodoText.trim()) return;
+    const maxOrder = Math.max(0, ...todos.map((t) => t.order_index));
+    await supabase.from("renovation_todos").insert({ project_id: project.id, text: newTodoText.trim(), order_index: maxOrder + 1 });
+    setNewTodoText("");
+    loadSub();
+  };
+  const toggleTodo = async (t) => { await supabase.from("renovation_todos").update({ done: !t.done }).eq("id", t.id); loadSub(); };
+  const deleteTodo = async (id) => { await supabase.from("renovation_todos").delete().eq("id", id); loadSub(); };
 
   const total = items.reduce((s, it) => s + Number(it.estimated_price || 0), 0);
   const days_total = effectiveDays({ ...project, days: Number(days) || 0, depends_on: dependsOn }, allProjects);
@@ -309,12 +376,22 @@ function ProjectDetail({ project, allProjects, isAdmin, onBack, onOpen, onAddChi
       {children.length === 0 && <Empty text="Noch keine Teilprojekte." />}
       {children.map((c, i) => {
         const statusInfo = STATUS[c.status] || STATUS.idee;
+        const cBlockedBy = (c.depends_on || []).map((id) => allProjects.find((x) => x.id === id)).filter((d) => d && d.status !== "fertig");
+        const cDays = effectiveDays(c, allProjects);
         return (
           <Card key={c.id} style={{ marginBottom: 8 }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
               <div onClick={() => onOpen(c.id)} style={{ cursor: "pointer", flex: 1 }}>
-                <div style={{ fontWeight: 700, fontSize: 13.5, color: COLOR.ink }}>{c.title}</div>
-                <div style={{ marginTop: 3 }}><Pill bg={statusInfo.bg} fg={statusInfo.fg}>{statusInfo.label}</Pill></div>
+                <div style={{ fontWeight: 700, fontSize: 13.5, color: COLOR.ink }}>{i + 1}. {c.title}</div>
+                <div style={{ marginTop: 3, display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                  <Pill bg={statusInfo.bg} fg={statusInfo.fg}>{statusInfo.label}</Pill>
+                  {cDays > 0 && <span style={{ fontSize: 11.5, color: COLOR.inkSoft }}>~{cDays} Tg.</span>}
+                </div>
+                {cBlockedBy.length > 0 && (
+                  <div style={{ fontSize: 11.5, color: COLOR.dringend, marginTop: 4, display: "flex", alignItems: "center", gap: 4 }}>
+                    <Lock size={11} /> Erst nach: {cBlockedBy.map((d) => d.title).join(", ")}
+                  </div>
+                )}
               </div>
               <div style={{ display: "flex", flexDirection: "column" }}>
                 <button onClick={() => onMoveChild(children, i, -1)} disabled={i === 0} style={{ background: "none", border: "none", cursor: i === 0 ? "default" : "pointer", opacity: i === 0 ? 0.3 : 1, padding: 0 }}><ChevronUp size={13} /></button>
@@ -327,6 +404,33 @@ function ProjectDetail({ project, allProjects, isAdmin, onBack, onOpen, onAddChi
       {showNewChild && (
         <NewProjectModal onClose={() => setShowNewChild(false)} onSave={(data) => { onAddChild(data); setShowNewChild(false); }} />
       )}
+
+      <SectionTitle>Ideensammlung</SectionTitle>
+      {[
+        ["pro", "👍 Pro", COLOR.erledigtBg, COLOR.erledigt, "Was spricht dafür?"],
+        ["kontra", "👎 Kontra", COLOR.dringendBg, COLOR.dringend, "Was spricht dagegen?"],
+        ["idee", "💡 Umsetzungsideen", "#F3ECDD", COLOR.accent, "Eine Möglichkeit, wie man es umsetzen könnte"],
+      ].map(([kind, label, bg, fg, placeholder]) => (
+        <Card key={kind} style={{ marginBottom: 10, background: bg, border: "none" }}>
+          <div style={{ fontSize: 12.5, fontWeight: 700, color: fg, marginBottom: 6 }}>{label}</div>
+          {ideas.filter((x) => x.kind === kind).map((x) => (
+            <div key={x.id} style={{ display: "flex", alignItems: "flex-start", gap: 8, padding: "4px 0" }}>
+              <span style={{ fontSize: 13.5, color: COLOR.ink, flex: 1, whiteSpace: "pre-wrap" }}>• {x.text}</span>
+              <button onClick={() => deleteIdea(x.id)} style={{ background: "none", border: "none", cursor: "pointer", color: COLOR.inkSoft, flexShrink: 0 }}>
+                <Trash2 size={13} />
+              </button>
+            </div>
+          ))}
+          <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
+            <input
+              style={{ ...inputStyle, marginBottom: 0, flex: 1, background: "#fff" }} value={newIdea[kind]} placeholder={placeholder}
+              onChange={(e) => setNewIdea((n) => ({ ...n, [kind]: e.target.value }))}
+              onKeyDown={(e) => { if (e.key === "Enter") addIdea(kind); }}
+            />
+            <button onClick={() => addIdea(kind)} style={btnGhost}>+</button>
+          </div>
+        </Card>
+      ))}
 
       <SectionTitle>Skizze</SectionTitle>
       <Card style={{ marginBottom: 14 }}>
@@ -356,6 +460,29 @@ function ProjectDetail({ project, allProjects, isAdmin, onBack, onOpen, onAddChi
           <input style={{ ...inputStyle, marginBottom: 0, flex: 1 }} value={newLinkNote} onChange={(e) => setNewLinkNote(e.target.value)} placeholder="Notiz (optional)" />
           <button onClick={addLink} style={btnGhost}>+</button>
         </div>
+      </div>
+
+      <SectionTitle>To-Do</SectionTitle>
+      {todos.length === 0 && <Empty text="Noch keine Schritte." />}
+      {todos.map((t) => (
+        <Card key={t.id} style={{ marginBottom: 6, padding: "10px 14px", display: "flex", alignItems: "center", gap: 10 }}>
+          <button onClick={() => toggleTodo(t)} style={{
+            width: 20, height: 20, borderRadius: 5, border: `2px solid ${t.done ? COLOR.erledigt : COLOR.line}`,
+            background: t.done ? COLOR.erledigt : "#fff", cursor: "pointer", flexShrink: 0,
+          }} />
+          <span style={{ fontSize: 13.5, color: t.done ? COLOR.inkSoft : COLOR.ink, textDecoration: t.done ? "line-through" : "none", flex: 1 }}>{t.text}</span>
+          <button onClick={() => deleteTodo(t.id)} style={{ background: "none", border: "none", cursor: "pointer", color: COLOR.inkSoft }}>
+            <Trash2 size={13} />
+          </button>
+        </Card>
+      ))}
+      <div style={{ display: "flex", gap: 6, marginBottom: 16 }}>
+        <input
+          style={{ ...inputStyle, marginBottom: 0, flex: 1 }} value={newTodoText} onChange={(e) => setNewTodoText(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter") addTodo(); }}
+          placeholder="z. B. Länge messen"
+        />
+        <button onClick={addTodo} style={btnGhost}>+</button>
       </div>
 
       <SectionTitle>Einkaufsliste</SectionTitle>

@@ -29,6 +29,8 @@ export default function Finanzen({ user, isAdmin }) {
   const [showPaid, setShowPaid] = useState(false);
   const [standingOrders, setStandingOrders] = useState([]);
   const [showNewStanding, setShowNewStanding] = useState(false);
+  const [newStandingKind, setNewStandingKind] = useState("monatlich"); // monatlich | einmalig
+  const [editingStanding, setEditingStanding] = useState(null);
   const [confirmDeleteStandingId, setConfirmDeleteStandingId] = useState(null);
 
   // Erzeugt die Personen-Aufteilung für eine einzelne Ausgabe (gleichmäßig, individuell
@@ -167,11 +169,25 @@ export default function Finanzen({ user, isAdmin }) {
   };
   useEffect(() => { load(); }, []);
 
-  const addStandingOrder = async (data) => {
-    await supabase.from("standing_orders").insert({
-      payer: data.payer, payee: data.payee, amount: +data.amount, note: data.note || null, active: true,
-    });
+  // Einmalzahlung = Dauerauftrag ohne monatlichen Betrag, nur mit Startguthaben: das Guthaben
+  // wird automatisch mit offenen Posten verrechnet, bis es aufgebraucht ist.
+  const saveStandingOrder = async (data) => {
+    if (data.editingId) {
+      await supabase.from("standing_orders").update({
+        amount: +data.amount || 0, credit_balance: +data.credit || 0, note: data.note || null,
+      }).eq("id", data.editingId);
+    } else if (data.kind === "einmalig") {
+      await supabase.from("standing_orders").insert({
+        payer: data.payer, payee: data.payee, amount: 0, credit_balance: +data.amount, note: data.note || "Einmalzahlung",
+        last_applied_month: todayISO().slice(0, 7), active: true,
+      });
+    } else {
+      await supabase.from("standing_orders").insert({
+        payer: data.payer, payee: data.payee, amount: +data.amount, note: data.note || null, active: true,
+      });
+    }
     setShowNewStanding(false);
+    setEditingStanding(null);
     load();
   };
   const toggleStandingActive = async (s) => {
@@ -334,7 +350,12 @@ export default function Finanzen({ user, isAdmin }) {
         </Card>
       ))}
 
-      <SectionTitle right={<IconBtn onClick={() => setShowNewStanding(true)}><Plus size={15} /> Dauerauftrag</IconBtn>}>
+      <SectionTitle right={
+        <div style={{ display: "flex", gap: 6 }}>
+          <IconBtn onClick={() => { setNewStandingKind("einmalig"); setShowNewStanding(true); }}><Plus size={15} /> Einmalzahlung</IconBtn>
+          <IconBtn onClick={() => { setNewStandingKind("monatlich"); setShowNewStanding(true); }}><Plus size={15} /> Dauerauftrag</IconBtn>
+        </div>
+      }>
         <Repeat size={15} style={{ marginRight: 5, verticalAlign: -2 }} />Daueraufträge
       </SectionTitle>
       <div style={{ fontSize: 11.5, color: COLOR.inkSoft, marginTop: -6, marginBottom: 10 }}>
@@ -347,14 +368,19 @@ export default function Finanzen({ user, isAdmin }) {
             <div>
               <div style={{ fontWeight: 700, fontSize: 13.5, color: COLOR.ink }}>{s.payer} → {s.payee}</div>
               <div style={{ fontSize: 11.5, color: COLOR.inkSoft }}>
-                {Number(s.amount).toFixed(2)} € monatlich{!s.active && " · pausiert"}
+                {Number(s.amount) > 0 ? `${Number(s.amount).toFixed(2)} € monatlich` : "Einmalzahlung / kein monatlicher Betrag"}{!s.active && " · pausiert"}
                 {s.note && ` · ${s.note}`}
               </div>
-              {Number(s.credit_balance) > 0.004 && (
-                <div style={{ fontSize: 12, color: COLOR.erledigt, marginTop: 2 }}>Guthaben: {Number(s.credit_balance).toFixed(2)} € (deckt den nächsten offenen Betrag automatisch mit ab)</div>
+              {Number(s.credit_balance) > 0.004 ? (
+                <div style={{ fontSize: 12, color: COLOR.erledigt, marginTop: 2 }}>Guthaben: {Number(s.credit_balance).toFixed(2)} € (deckt offene Beträge automatisch mit ab)</div>
+              ) : Number(s.amount) === 0 && (
+                <div style={{ fontSize: 12, color: COLOR.inkSoft, marginTop: 2 }}>Guthaben aufgebraucht</div>
               )}
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <button onClick={() => setEditingStanding(s)} style={{ background: "none", border: "none", cursor: "pointer", color: COLOR.inkSoft }}>
+                <Pencil size={14} />
+              </button>
               <button onClick={() => toggleStandingActive(s)} style={{ background: "none", border: "none", cursor: "pointer", color: COLOR.inkSoft }}>
                 {s.active ? <Pause size={14} /> : <Play size={14} />}
               </button>
@@ -442,7 +468,8 @@ export default function Finanzen({ user, isAdmin }) {
       {editingRecurring && (
         <NewRecurringExpenseModal people={people} horses={horses} editing={editingRecurring} onClose={() => setEditingRecurring(null)} onSave={saveRecurring} />
       )}
-      {showNewStanding && <NewStandingOrderModal people={people} defaultPayer={user} onClose={() => setShowNewStanding(false)} onSave={addStandingOrder} />}
+      {showNewStanding && <NewStandingOrderModal people={people} defaultPayer={user} initialKind={newStandingKind} onClose={() => setShowNewStanding(false)} onSave={saveStandingOrder} />}
+      {editingStanding && <NewStandingOrderModal people={people} defaultPayer={user} editing={editingStanding} onClose={() => setEditingStanding(null)} onSave={saveStandingOrder} />}
     </div>
   );
 }
@@ -580,31 +607,55 @@ function NewExpenseModal({ people, horses, editing, onClose, onSave }) {
   );
 }
 
-function NewStandingOrderModal({ people, defaultPayer, onClose, onSave }) {
-  const [payer, setPayer] = useState(defaultPayer || people[0] || "");
-  const [payee, setPayee] = useState(people.find((p) => p !== defaultPayer) || "");
-  const [amount, setAmount] = useState("");
-  const [note, setNote] = useState("");
-  const canSave = payer && payee && payer !== payee && amount;
+function NewStandingOrderModal({ people, defaultPayer, initialKind, editing, onClose, onSave }) {
+  const [kind, setKind] = useState(initialKind || "monatlich");
+  const [payer, setPayer] = useState(editing?.payer || defaultPayer || people[0] || "");
+  const [payee, setPayee] = useState(editing?.payee || people.find((p) => p !== defaultPayer) || "");
+  const [amount, setAmount] = useState(editing ? String(editing.amount) : "");
+  const [credit, setCredit] = useState(editing ? String(editing.credit_balance ?? 0) : "");
+  const [note, setNote] = useState(editing?.note || "");
+  const modeBtn = { flex: 1, padding: "8px 0", borderRadius: 9, border: `1px solid ${COLOR.line}`, background: "#fff", fontSize: 13, fontWeight: 600, cursor: "pointer" };
+  const canSave = editing ? amount !== "" : (payer && payee && payer !== payee && amount);
   return (
-    <Modal title="Neuer Dauerauftrag" onClose={onClose}>
-      <label style={labelStyle}>Von</label>
-      <select style={inputStyle} value={payer} onChange={(e) => setPayer(e.target.value)}>
-        {people.map((u) => <option key={u}>{u}</option>)}
-      </select>
-      <label style={labelStyle}>An</label>
-      <select style={inputStyle} value={payee} onChange={(e) => setPayee(e.target.value)}>
-        {people.map((u) => <option key={u}>{u}</option>)}
-      </select>
-      <label style={labelStyle}>Betrag monatlich (€)</label>
+    <Modal title={editing ? "Dauerauftrag / Guthaben bearbeiten" : kind === "einmalig" ? "Einmalzahlung" : "Neuer Dauerauftrag"} onClose={onClose}>
+      {editing ? (
+        <div style={{ fontSize: 13, color: COLOR.ink, marginBottom: 12, fontWeight: 600 }}>{editing.payer} → {editing.payee}</div>
+      ) : (
+        <>
+          <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+            <button type="button" onClick={() => setKind("monatlich")} style={{ ...modeBtn, ...(kind === "monatlich" ? { background: "#F3ECDD", borderColor: COLOR.accent } : {}) }}>Monatlich</button>
+            <button type="button" onClick={() => setKind("einmalig")} style={{ ...modeBtn, ...(kind === "einmalig" ? { background: "#F3ECDD", borderColor: COLOR.accent } : {}) }}>Einmalzahlung</button>
+          </div>
+          <label style={labelStyle}>Von</label>
+          <select style={inputStyle} value={payer} onChange={(e) => setPayer(e.target.value)}>
+            {people.map((u) => <option key={u}>{u}</option>)}
+          </select>
+          <label style={labelStyle}>An</label>
+          <select style={inputStyle} value={payee} onChange={(e) => setPayee(e.target.value)}>
+            {people.map((u) => <option key={u}>{u}</option>)}
+          </select>
+        </>
+      )}
+      <label style={labelStyle}>{editing ? "Betrag monatlich (€) – 0 = nur das Guthaben aufbrauchen" : kind === "einmalig" ? "Betrag (€)" : "Betrag monatlich (€)"}</label>
       <input type="number" style={inputStyle} value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="z. B. 150" />
+      {kind === "einmalig" && !editing && (
+        <div style={{ fontSize: 11.5, color: COLOR.inkSoft, marginTop: -8, marginBottom: 10 }}>
+          Wird einmalig als Guthaben gutgeschrieben und automatisch mit offenen Beträgen zwischen den beiden verrechnet, bis es aufgebraucht ist – es kommt kein weiterer Betrag nach.
+        </div>
+      )}
+      {editing && (
+        <>
+          <label style={labelStyle}>Aktuelles Guthaben (€)</label>
+          <input type="number" style={inputStyle} value={credit} onChange={(e) => setCredit(e.target.value)} />
+        </>
+      )}
       <label style={labelStyle}>Notiz (optional)</label>
       <input style={inputStyle} value={note} onChange={(e) => setNote(e.target.value)} placeholder="z. B. deckt Stallmiete + etwas Heu-Vorauszahlung" />
       <button
         disabled={!canSave}
-        onClick={() => onSave({ payer, payee, amount, note })}
+        onClick={() => onSave({ kind, payer, payee, amount, credit, note, editingId: editing?.id })}
         style={{ ...btnPrimary, width: "100%", padding: "11px 0", opacity: canSave ? 1 : 0.5 }}
-      >Speichern</button>
+      >{editing ? "Änderungen speichern" : "Speichern"}</button>
     </Modal>
   );
 }

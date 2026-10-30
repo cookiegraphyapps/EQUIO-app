@@ -3,6 +3,7 @@ import { ChevronLeft, Syringe, Scissors, Stethoscope, Pill as PillIcon, Dumbbell
 import { supabase, uploadPhoto } from "../supabaseClient";
 import { Card, SectionTitle, Empty, Pill, Modal, IconBtn, COLOR, fmtDate, daysUntil, nextDue, addMonths, addDays, dateToISO, parseISODate, HEALTH_LABELS, HEALTH_DEFAULT_INTERVAL, HEALTH_INTERVAL_UNIT, inputStyle, labelStyle, btnPrimary, btnGhost, navBtn, todayISO } from "../components/ui";
 import { BlanketCard } from "../components/Deckenguide";
+import { HorseSharedFeed } from "../components/Futter";
 
 const ICONS = { impfung: Syringe, hufschmied: Scissors, zahnarzt: Stethoscope, entwurmung: PillIcon };
 const INTENSITAETEN = ["locker", "normal", "intensiv"];
@@ -508,6 +509,7 @@ function PferdDetail({ horse, user, isAdmin, onBack, onSave, onDelete }) {
           </>
         )}
       </Card>
+      <HorseSharedFeed horse={horse} />
 
       <SectionTitle right={<IconBtn onClick={() => setShowNewTraining(true)}><Plus size={15} /> Eintrag</IconBtn>}>
         <Dumbbell size={15} style={{ marginRight: 5, verticalAlign: -2 }} />Trainingstagebuch

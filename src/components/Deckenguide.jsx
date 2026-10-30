@@ -12,7 +12,7 @@ const stageRank = (s) => ({ none: 0, light: 1, heavy: 2 }[s]);
 const bumpStage = (s) => (s === "none" ? "light" : "heavy");
 
 async function fetchWeather(lat, lon) {
-  const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&hourly=temperature_2m,precipitation,wind_speed_10m&past_days=1&forecast_days=2&timezone=auto`;
+  const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&hourly=temperature_2m,precipitation,precipitation_probability,wind_speed_10m&past_days=1&forecast_days=2&timezone=auto`;
   const res = await fetch(url);
   if (!res.ok) throw new Error("Wetterdaten konnten nicht geladen werden");
   const data = await res.json();
@@ -81,11 +81,14 @@ function computeWindowRecommendation(hourly, profile, settings, start, end) {
   let windowMin = Infinity;
   for (let i = start; i <= end; i++) if (temps[i] !== undefined && temps[i] < windowMin) windowMin = temps[i];
 
-  let qualifyingMinutes = 0, maxRate = 0, maxWind = 0;
+  let qualifyingMinutes = 0, maxRate = 0, maxWind = 0, maxProb = 0, rainSum = 0;
+  const probs = hourly.precipitation_probability || [];
   for (let i = start; i <= end; i++) {
     const rate = precip[i] || 0;
+    rainSum += rate;
     if (rate >= 0.2) { qualifyingMinutes += 60; if (rate > maxRate) maxRate = rate; }
     if ((wind[i] || 0) > maxWind) maxWind = wind[i];
+    if ((probs[i] || 0) > maxProb) maxProb = probs[i];
   }
   const rainQualifies = qualifyingMinutes >= settings.rain_qualify_total_minutes;
 
@@ -113,7 +116,23 @@ function computeWindowRecommendation(hourly, profile, settings, start, end) {
 
   if (currentTemp > 10) stage = "none"; // feste Obergrenze, unabhängig von allem anderen
 
-  return { stage, currentTemp, qualifyingMinutes, maxRate, maxWind, rainQualifies, onsetTime };
+  // Übertemperatur-Hinweis: Wird es NACH dem Eindecken (ab Beginn der Kälte bis Fensterende)
+  // zwischendurch über 10 °C gemeldet, würde das Pferd unter der Decke zu warm. Weil stündliche
+  // Daten keine Minutengenauigkeit haben, zählt schon eine einzelne Stunde über 10 °C.
+  let overheat = null;
+  if (stage !== "none") {
+    const from = onsetTime ? Math.max(start, hourly.time.indexOf(onsetTime)) : start;
+    for (let i = from; i <= end; i++) {
+      if (temps[i] !== undefined && temps[i] > 10) {
+        let peak = temps[i];
+        for (let j = i; j <= end; j++) if (temps[j] > peak) peak = temps[j];
+        overheat = { time: hourly.time[i], peak };
+        break;
+      }
+    }
+  }
+
+  return { stage, currentTemp, qualifyingMinutes, maxRate, maxWind, rainQualifies, onsetTime, maxProb, rainSum, overheat };
 }
 
 function computeRecommendation(hourly, profile, settings) {
@@ -193,6 +212,9 @@ export function BlanketCard({ horse, isAdmin, onProfileChange }) {
           {info.label}
         </span>
         <div style={{ fontSize: 11.5, color: COLOR.inkSoft, marginTop: 3 }}>{data.currentTemp.toFixed(1)}°C{data.rainQualifies ? " · Regen" : ""}</div>
+        <div style={{ fontSize: 11.5, color: data.maxProb >= 50 || data.rainSum >= 1 ? COLOR.ink : COLOR.inkSoft, marginTop: 2, fontWeight: data.maxProb >= 50 ? 600 : 400 }}>
+          🌧 bis {Math.round(data.maxProb)} % · {data.rainSum.toFixed(1)} mm
+        </div>
         {data.onsetTime && (
           <div style={{ fontSize: 11.5, color: COLOR.dringend, marginTop: 2, fontWeight: 600 }}>
             ab ca. {data.onsetTime.slice(11, 16)} Uhr eindecken
@@ -220,6 +242,12 @@ export function BlanketCard({ horse, isAdmin, onProfileChange }) {
         <Period label="Tag" icon="☀️" data={result.day} />
         <Period label="Nacht" icon="🌙" data={result.night} />
       </div>
+
+      {[["Tag", result.day], ["Nacht", result.night]].map(([name, d]) => d && d.overheat && (
+        <div key={name} style={{ marginTop: 10, background: COLOR.uebernommenBg, color: COLOR.uebernommen, borderRadius: 10, padding: "8px 10px", fontSize: 12, fontWeight: 600 }}>
+          ⚠️ {name}: ab ca. {d.overheat.time.slice(11, 16)} Uhr bis zu {d.overheat.peak.toFixed(1)}°C gemeldet – dann lieber keine Decke (lieber etwas zu kalt als zu warm).
+        </div>
+      ))}
 
       <div style={{ marginTop: 12 }}>
         <label style={{ ...labelStyle, marginBottom: 4 }}>Profil</label>

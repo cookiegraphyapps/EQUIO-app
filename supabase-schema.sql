@@ -630,6 +630,42 @@ alter table standing_orders enable row level security;
 drop policy if exists "standing_orders_all" on standing_orders;
 create policy "standing_orders_all" on standing_orders for all using (auth.role() = 'authenticated') with check (auth.role() = 'authenticated');
 
+-- Ideensammlung je Stallprojekt/Teilprojekt: Pro, Kontra und Umsetzungsideen
+create table if not exists renovation_ideas (
+  id uuid primary key default gen_random_uuid(),
+  project_id uuid not null references renovation_projects(id) on delete cascade,
+  kind text not null, -- pro | kontra | idee
+  text text not null,
+  created_at timestamptz default now()
+);
+alter table renovation_ideas enable row level security;
+drop policy if exists "renovation_ideas_all" on renovation_ideas;
+create policy "renovation_ideas_all" on renovation_ideas for all using (auth.role() = 'authenticated') with check (auth.role() = 'authenticated');
+
+-- Geteilte Futtersorten (z.B. Hafer, Leinkuchen) + Tagesmenge pro Pferd. Daraus wird beim
+-- Futterkauf der Kostenanteil je Pferd/Besitzer:in automatisch berechnet.
+create table if not exists feed_types (
+  id uuid primary key default gen_random_uuid(),
+  name text not null unique,
+  unit text not null default 'g', -- Einheit der Tagesmenge, z.B. g oder Becher
+  created_at timestamptz default now()
+);
+insert into feed_types (name, unit) values ('Hafer', 'g'), ('Leinkuchen', 'Becher')
+on conflict (name) do nothing;
+create table if not exists horse_feed (
+  id uuid primary key default gen_random_uuid(),
+  horse_id uuid not null references horses(id) on delete cascade,
+  feed_type_id uuid not null references feed_types(id) on delete cascade,
+  amount_per_day numeric not null default 0,
+  unique (horse_id, feed_type_id)
+);
+alter table feed_types enable row level security;
+alter table horse_feed enable row level security;
+drop policy if exists "feed_types_all" on feed_types;
+drop policy if exists "horse_feed_all" on horse_feed;
+create policy "feed_types_all" on feed_types for all using (auth.role() = 'authenticated') with check (auth.role() = 'authenticated');
+create policy "horse_feed_all" on horse_feed for all using (auth.role() = 'authenticated') with check (auth.role() = 'authenticated');
+
 -- Feste Checkliste für den jährlich wiederkehrenden Stallwechsel (Sommer-/Winterstall) –
 -- einmal eingetragen, jedes Jahr wieder nutzbar (statt jedes Mal neu überlegen zu müssen).
 create table if not exists move_checklist_templates (
@@ -755,6 +791,18 @@ create table if not exists renovation_links (
   note text,
   created_at timestamptz default now()
 );
+create table if not exists renovation_todos (
+  id uuid primary key default gen_random_uuid(),
+  project_id uuid not null references renovation_projects(id) on delete cascade,
+  text text not null,
+  done boolean not null default false,
+  order_index int not null default 0,
+  created_at timestamptz default now()
+);
+alter table renovation_todos enable row level security;
+drop policy if exists "renovation_todos_all" on renovation_todos;
+create policy "renovation_todos_all" on renovation_todos for all using (auth.role() = 'authenticated') with check (auth.role() = 'authenticated');
+
 create table if not exists renovation_shopping_items (
   id uuid primary key default gen_random_uuid(),
   project_id uuid not null references renovation_projects(id) on delete cascade,
