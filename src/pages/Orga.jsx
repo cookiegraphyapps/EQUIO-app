@@ -24,7 +24,7 @@ export default function Orga({ user, isAdmin }) {
       <Card onClick={() => navigate("/orga/futter")} style={{ marginTop: 8, marginBottom: 8, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <Wheat size={16} color={COLOR.accent} />
-          <span style={{ fontSize: 14, fontWeight: 700, color: COLOR.ink }}>Geteiltes Futter</span>
+          <span style={{ fontSize: 14, fontWeight: 700, color: COLOR.ink }}>Futter</span>
         </div>
         <ChevronRight size={16} color={COLOR.inkSoft} />
       </Card>

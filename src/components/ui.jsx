@@ -102,9 +102,9 @@ export function Card({ children, style, onClick }) {
 
 export function SectionTitle({ children, right }) {
   return (
-    <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", margin: "22px 0 10px" }}>
-      <h2 style={{ fontFamily: "Fraunces, serif", fontWeight: 600, fontSize: 19, color: COLOR.ink, margin: 0 }}>{children}</h2>
-      {right}
+    <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: "8px 10px", margin: "22px 0 10px" }}>
+      <h2 style={{ fontFamily: "Fraunces, serif", fontWeight: 600, fontSize: 19, color: COLOR.ink, margin: 0, minWidth: 0 }}>{children}</h2>
+      {right && <div style={{ marginLeft: "auto", maxWidth: "100%" }}>{right}</div>}
     </div>
   );
 }
@@ -114,7 +114,7 @@ export function IconBtn({ onClick, children, label }) {
     <button onClick={onClick} aria-label={label} style={{
       display: "flex", alignItems: "center", gap: 6, background: COLOR.ink, color: "#fff",
       border: "none", borderRadius: 10, padding: "8px 12px", fontSize: 13, fontWeight: 600, cursor: "pointer",
-      fontFamily: "Inter, sans-serif",
+      fontFamily: "Inter, sans-serif", whiteSpace: "nowrap",
     }}>{children}</button>
   );
 }

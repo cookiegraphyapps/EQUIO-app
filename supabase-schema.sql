@@ -630,6 +630,20 @@ alter table standing_orders enable row level security;
 drop policy if exists "standing_orders_all" on standing_orders;
 create policy "standing_orders_all" on standing_orders for all using (auth.role() = 'authenticated') with check (auth.role() = 'authenticated');
 
+-- Verlauf je Dauerauftrag/Einmalzahlung: Gutschriften (+) und was davon verrechnet wurde (−),
+-- damit nachvollziehbar bleibt, wie sich das Guthaben zusammensetzt.
+create table if not exists standing_order_log (
+  id uuid primary key default gen_random_uuid(),
+  standing_order_id uuid not null references standing_orders(id) on delete cascade,
+  entry_date date not null default current_date,
+  amount numeric not null, -- positiv = Gutschrift, negativ = Verrechnung/Abzug
+  text text not null,
+  created_at timestamptz default now()
+);
+alter table standing_order_log enable row level security;
+drop policy if exists "standing_order_log_all" on standing_order_log;
+create policy "standing_order_log_all" on standing_order_log for all using (auth.role() = 'authenticated') with check (auth.role() = 'authenticated');
+
 -- Ideensammlung je Stallprojekt/Teilprojekt: Pro, Kontra und Umsetzungsideen
 create table if not exists renovation_ideas (
   id uuid primary key default gen_random_uuid(),
@@ -659,6 +673,14 @@ create table if not exists horse_feed (
   amount_per_day numeric not null default 0,
   unique (horse_id, feed_type_id)
 );
+-- Futtersorte geteilt (Kosten nach Menge auf alle Pferde) oder nur für einzelne Pferde (z.B. Mineralfutter)
+alter table feed_types add column if not exists is_shared boolean not null default true;
+insert into feed_types (name, unit, is_shared) values ('Mineralfutter', 'Portion', false)
+on conflict (name) do nothing;
+-- Letzter Kauf je Pferd und Futtersorte: für "reicht bis" und die Monatskosten in der Übersicht
+alter table horse_feed add column if not exists last_bought date;
+alter table horse_feed add column if not exists lasts_days int;
+alter table horse_feed add column if not exists last_cost numeric;
 alter table feed_types enable row level security;
 alter table horse_feed enable row level security;
 drop policy if exists "feed_types_all" on feed_types;

@@ -3,7 +3,7 @@ import { ChevronLeft, Syringe, Scissors, Stethoscope, Pill as PillIcon, Dumbbell
 import { supabase, uploadPhoto } from "../supabaseClient";
 import { Card, SectionTitle, Empty, Pill, Modal, IconBtn, COLOR, fmtDate, daysUntil, nextDue, addMonths, addDays, dateToISO, parseISODate, HEALTH_LABELS, HEALTH_DEFAULT_INTERVAL, HEALTH_INTERVAL_UNIT, inputStyle, labelStyle, btnPrimary, btnGhost, navBtn, todayISO } from "../components/ui";
 import { BlanketCard } from "../components/Deckenguide";
-import { HorseSharedFeed } from "../components/Futter";
+import { HorseFeedPlan } from "../components/Futter";
 
 const ICONS = { impfung: Syringe, hufschmied: Scissors, zahnarzt: Stethoscope, entwurmung: PillIcon };
 const INTENSITAETEN = ["locker", "normal", "intensiv"];
@@ -492,10 +492,12 @@ function PferdDetail({ horse, user, isAdmin, onBack, onSave, onDelete }) {
       <SectionTitle>
         <Wheat size={15} style={{ marginRight: 5, verticalAlign: -2 }} />Futterplan
       </SectionTitle>
+      <HorseFeedPlan horse={horse} user={user} />
       <Card style={{ marginBottom: 8 }}>
+        <div style={{ fontSize: 12, fontWeight: 700, color: COLOR.inkSoft, marginBottom: 6 }}>Hinweise zur Fütterung</div>
         {editingFeedPlan ? (
           <>
-            <textarea style={{ ...inputStyle, minHeight: 90 }} value={feedPlan} onChange={(e) => setFeedPlan(e.target.value)} placeholder="z. B. morgens 1 Schöpfer Müsli + Heu nach Bedarf …" />
+            <textarea style={{ ...inputStyle, minHeight: 90 }} value={feedPlan} onChange={(e) => setFeedPlan(e.target.value)} placeholder="z. B. immer eingeweicht füttern, Lieblingskonsistenz dickflüssig …" />
             {feedPlanError && <div style={{ fontSize: 12, color: COLOR.dringend, marginBottom: 8 }}>{feedPlanError}</div>}
             <div style={{ display: "flex", gap: 8 }}>
               <button style={btnPrimary} disabled={savingFeedPlan} onClick={saveFeedPlan}>Speichern</button>
@@ -504,12 +506,11 @@ function PferdDetail({ horse, user, isAdmin, onBack, onSave, onDelete }) {
           </>
         ) : (
           <>
-            <div style={{ fontSize: 13.5, color: COLOR.ink, whiteSpace: "pre-wrap" }}>{feedPlan || "Noch kein Futterplan hinterlegt."}</div>
-            <button onClick={() => setEditingFeedPlan(true)} style={{ ...btnGhost, marginTop: 8 }}>Futterplan bearbeiten</button>
+            <div style={{ fontSize: 13.5, color: COLOR.ink, whiteSpace: "pre-wrap" }}>{feedPlan || "Noch keine Hinweise hinterlegt."}</div>
+            <button onClick={() => setEditingFeedPlan(true)} style={{ ...btnGhost, marginTop: 8 }}>Hinweise bearbeiten</button>
           </>
         )}
       </Card>
-      <HorseSharedFeed horse={horse} />
 
       <SectionTitle right={<IconBtn onClick={() => setShowNewTraining(true)}><Plus size={15} /> Eintrag</IconBtn>}>
         <Dumbbell size={15} style={{ marginRight: 5, verticalAlign: -2 }} />Trainingstagebuch

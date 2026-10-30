@@ -31,6 +31,9 @@ export default function Finanzen({ user, isAdmin }) {
   const [showNewStanding, setShowNewStanding] = useState(false);
   const [newStandingKind, setNewStandingKind] = useState("monatlich"); // monatlich | einmalig
   const [editingStanding, setEditingStanding] = useState(null);
+  const [standingLog, setStandingLog] = useState([]);
+  const [showLog, setShowLog] = useState(false);
+  const [showAddLog, setShowAddLog] = useState(false);
   const [confirmDeleteStandingId, setConfirmDeleteStandingId] = useState(null);
 
   // Erzeugt die Personen-Aufteilung für eine einzelne Ausgabe (gleichmäßig, individuell
@@ -107,9 +110,9 @@ export default function Finanzen({ user, isAdmin }) {
         (ex.expense_splits || []).forEach((s) => {
           if (s.status === "erhalten") return;
           if (s.user_name === order.payer && ex.paid_by === order.payee) {
-            openSplits.push({ id: s.id, amount: Number(s.amount), date: ex.date });
+            openSplits.push({ id: s.id, amount: Number(s.amount), date: ex.date, label: `${ex.description} – Anteil ${s.user_name}` });
           } else if (s.user_name === order.payee && ex.paid_by === order.payer) {
-            openSplits.push({ id: s.id, amount: Number(s.amount), date: ex.date });
+            openSplits.push({ id: s.id, amount: Number(s.amount), date: ex.date, label: `${ex.description} – Anteil ${s.user_name}` });
           }
         });
       });
@@ -117,10 +120,17 @@ export default function Finanzen({ user, isAdmin }) {
       const toSettle = [];
       for (const s of openSplits) {
         if (available < s.amount) break;
-        toSettle.push(s.id);
+        toSettle.push(s);
         available -= s.amount;
       }
-      if (toSettle.length > 0) await supabase.from("expense_splits").update({ status: "erhalten" }).in("id", toSettle);
+      if (toSettle.length > 0) await supabase.from("expense_splits").update({ status: "erhalten" }).in("id", toSettle.map((x) => x.id));
+      // Verlauf mitschreiben: monatliche Gutschrift und jede verrechnete Ausgabe
+      const logRows = [];
+      if (isNewMonth && Number(order.amount) > 0) {
+        logRows.push({ standing_order_id: order.id, entry_date: todayISO(), amount: Number(order.amount), text: "Monatlicher Betrag gutgeschrieben" });
+      }
+      toSettle.forEach((x) => logRows.push({ standing_order_id: order.id, entry_date: todayISO(), amount: -x.amount, text: `Verrechnet: ${x.label}` }));
+      if (logRows.length > 0) await supabase.from("standing_order_log").insert(logRows);
       if (available !== Number(order.credit_balance || 0) || isNewMonth) {
         await supabase.from("standing_orders").update({
           credit_balance: available,
@@ -163,6 +173,9 @@ export default function Finanzen({ user, isAdmin }) {
       setExpenses(existingExpenses);
       setStandingOrders(standing);
     }
+    const { data: logData } = await supabase.from("standing_order_log").select("*")
+      .order("entry_date", { ascending: false }).order("created_at", { ascending: false });
+    setStandingLog(logData ?? []);
     setPeople((profRes.data ?? []).map((p) => p.name));
     setHorses(horsesRes.data ?? []);
     setRecurringExpenses(recurring);
@@ -173,14 +186,23 @@ export default function Finanzen({ user, isAdmin }) {
   // wird automatisch mit offenen Posten verrechnet, bis es aufgebraucht ist.
   const saveStandingOrder = async (data) => {
     if (data.editingId) {
+      const old = standingOrders.find((o) => o.id === data.editingId);
+      const newCredit = +data.credit || 0;
       await supabase.from("standing_orders").update({
-        amount: +data.amount || 0, credit_balance: +data.credit || 0, note: data.note || null,
+        amount: +data.amount || 0, credit_balance: newCredit, note: data.note || null,
       }).eq("id", data.editingId);
+      const diff = newCredit - Number(old?.credit_balance || 0);
+      if (Math.abs(diff) > 0.004) {
+        await supabase.from("standing_order_log").insert({ standing_order_id: data.editingId, entry_date: todayISO(), amount: +diff.toFixed(2), text: "Guthaben manuell angepasst" });
+      }
     } else if (data.kind === "einmalig") {
-      await supabase.from("standing_orders").insert({
+      const { data: created } = await supabase.from("standing_orders").insert({
         payer: data.payer, payee: data.payee, amount: 0, credit_balance: +data.amount, note: data.note || "Einmalzahlung",
         last_applied_month: todayISO().slice(0, 7), active: true,
-      });
+      }).select().single();
+      if (created) {
+        await supabase.from("standing_order_log").insert({ standing_order_id: created.id, entry_date: todayISO(), amount: +data.amount, text: data.note || "Einmalzahlung" });
+      }
     } else {
       await supabase.from("standing_orders").insert({
         payer: data.payer, payee: data.payee, amount: +data.amount, note: data.note || null, active: true,
@@ -351,7 +373,7 @@ export default function Finanzen({ user, isAdmin }) {
       ))}
 
       <SectionTitle right={
-        <div style={{ display: "flex", gap: 6 }}>
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", justifyContent: "flex-end" }}>
           <IconBtn onClick={() => { setNewStandingKind("einmalig"); setShowNewStanding(true); }}><Plus size={15} /> Einmalzahlung</IconBtn>
           <IconBtn onClick={() => { setNewStandingKind("monatlich"); setShowNewStanding(true); }}><Plus size={15} /> Dauerauftrag</IconBtn>
         </div>
@@ -397,6 +419,50 @@ export default function Finanzen({ user, isAdmin }) {
           </div>
         </Card>
       ))}
+
+      {standingOrders.length > 0 && (
+        <Card style={{ marginBottom: 14 }}>
+          <button onClick={() => setShowLog((v) => !v)} style={{
+            display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%", background: "none", border: "none",
+            cursor: "pointer", padding: 0, fontSize: 14, fontWeight: 700, color: COLOR.ink,
+          }}>
+            <span>📒 Verlauf Guthaben ({standingLog.length})</span>
+            {showLog ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+          </button>
+          {showLog && (
+            <div style={{ marginTop: 10 }}>
+              {standingLog.length === 0 && (
+                <div style={{ fontSize: 12, color: COLOR.inkSoft, marginBottom: 8 }}>
+                  Noch nichts erfasst – ab jetzt wird jede Gutschrift und jede Verrechnung automatisch mitgeschrieben. Frühere Bewegungen (z. B. die ursprüngliche Einzahlung) kannst du unten nachtragen.
+                </div>
+              )}
+              {standingLog.map((l) => {
+                const o = standingOrders.find((x) => x.id === l.standing_order_id);
+                return (
+                  <div key={l.id} style={{ display: "flex", justifyContent: "space-between", gap: 8, padding: "6px 0", borderTop: `1px solid ${COLOR.line}`, fontSize: 12.5 }}>
+                    <div style={{ color: COLOR.ink }}>
+                      <div>{l.text}</div>
+                      <div style={{ color: COLOR.inkSoft, fontSize: 11.5 }}>{fmtDate(l.entry_date)}{o ? ` · aus Guthaben ${o.payer} → ${o.payee}` : ""}</div>
+                    </div>
+                    <strong style={{ color: Number(l.amount) >= 0 ? COLOR.erledigt : COLOR.dringend, whiteSpace: "nowrap" }}>
+                      {Number(l.amount) >= 0 ? "+" : "−"}{Math.abs(Number(l.amount)).toFixed(2)} €
+                    </strong>
+                  </div>
+                );
+              })}
+              {standingOrders.map((o) => (
+                <div key={o.id} style={{ display: "flex", justifyContent: "space-between", padding: "8px 0 2px", borderTop: `2px solid ${COLOR.line}`, fontSize: 13, fontWeight: 700, color: COLOR.ink }}>
+                  <span>Guthaben jetzt {o.payer} → {o.payee}</span><span>{Number(o.credit_balance).toFixed(2)} €</span>
+                </div>
+              ))}
+              <button onClick={() => setShowAddLog(true)} style={{ background: "none", border: "none", color: COLOR.inkSoft, fontSize: 12, cursor: "pointer", padding: "8px 0 0" }}>
+                ＋ Frühere Bewegung nachtragen
+              </button>
+            </div>
+          )}
+        </Card>
+      )}
+
 
       <SectionTitle right={<IconBtn onClick={() => setShowNewRecurring(true)}><Plus size={15} /> Wiederkehrend</IconBtn>}>
         <Repeat size={15} style={{ marginRight: 5, verticalAlign: -2 }} />Wiederkehrende Kosten
@@ -469,6 +535,11 @@ export default function Finanzen({ user, isAdmin }) {
         <NewRecurringExpenseModal people={people} horses={horses} editing={editingRecurring} onClose={() => setEditingRecurring(null)} onSave={saveRecurring} />
       )}
       {showNewStanding && <NewStandingOrderModal people={people} defaultPayer={user} initialKind={newStandingKind} onClose={() => setShowNewStanding(false)} onSave={saveStandingOrder} />}
+      {showAddLog && <AddLogEntryModal orders={standingOrders} onClose={() => setShowAddLog(false)} onSave={async (entry) => {
+        await supabase.from("standing_order_log").insert(entry);
+        setShowAddLog(false);
+        load();
+      }} />}
       {editingStanding && <NewStandingOrderModal people={people} defaultPayer={user} editing={editingStanding} onClose={() => setEditingStanding(null)} onSave={saveStandingOrder} />}
     </div>
   );
@@ -656,6 +727,42 @@ function NewStandingOrderModal({ people, defaultPayer, initialKind, editing, onC
         onClick={() => onSave({ kind, payer, payee, amount, credit, note, editingId: editing?.id })}
         style={{ ...btnPrimary, width: "100%", padding: "11px 0", opacity: canSave ? 1 : 0.5 }}
       >{editing ? "Änderungen speichern" : "Speichern"}</button>
+    </Modal>
+  );
+}
+
+// Nur zur Übersicht: trägt eine frühere Bewegung in den Verlauf ein (z. B. die ursprüngliche
+// Einzahlung von 400 €), ohne das aktuelle Guthaben zu verändern.
+function AddLogEntryModal({ orders, onClose, onSave }) {
+  const [orderId, setOrderId] = useState(orders[0]?.id || "");
+  const [text, setText] = useState("");
+  const [amount, setAmount] = useState("");
+  const [date, setDate] = useState(todayISO());
+  const order = orders.find((o) => o.id === orderId);
+  return (
+    <Modal title="Frühere Bewegung nachtragen" onClose={onClose}>
+      <div style={{ fontSize: 11.5, color: COLOR.inkSoft, marginBottom: 12 }}>
+        Nur für die Übersicht – das aktuelle Guthaben ändert sich dadurch nicht.
+      </div>
+      {orders.length > 1 && (
+        <>
+          <label style={labelStyle}>Zu welchem Guthaben?</label>
+          <select style={inputStyle} value={orderId} onChange={(e) => setOrderId(e.target.value)}>
+            {orders.map((o) => <option key={o.id} value={o.id}>{o.payer} → {o.payee} ({Number(o.credit_balance).toFixed(2)} €)</option>)}
+          </select>
+        </>
+      )}
+      <label style={labelStyle}>Beschreibung</label>
+      <input style={inputStyle} value={text} onChange={(e) => setText(e.target.value)} placeholder={`z. B. Einmalzahlung ${order ? `${order.payer} → ${order.payee}` : ""}`} />
+      <label style={labelStyle}>Betrag (€) – Minus für einen Abzug</label>
+      <input type="number" step="any" style={inputStyle} value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="z. B. 400 oder -116,13" />
+      <label style={labelStyle}>Datum</label>
+      <input type="date" style={inputStyle} value={date} onChange={(e) => setDate(e.target.value)} />
+      <button
+        disabled={!text.trim() || amount === "" || !orderId}
+        onClick={() => onSave({ standing_order_id: orderId, text: text.trim(), amount: Number(amount), entry_date: date })}
+        style={{ ...btnPrimary, width: "100%", padding: "11px 0", opacity: !text.trim() || amount === "" || !orderId ? 0.5 : 1 }}
+      >Eintragen</button>
     </Modal>
   );
 }
