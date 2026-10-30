@@ -151,6 +151,15 @@ export default function Finanzen({ user, isAdmin }) {
     const existingExpenses = expRes.data ?? [];
     const recurring = recurringRes.data ?? [];
     const standing = standingRes.data ?? [];
+    // Bestehende Guthaben, für die noch nichts mitgeschrieben wurde, bekommen einen Startstand-
+    // Eintrag, damit die Aufzählung ab dem aktuellen Betrag nachvollziehbar beginnt.
+    const { data: loggedIds } = await supabase.from("standing_order_log").select("standing_order_id");
+    const withLog = new Set((loggedIds ?? []).map((l) => l.standing_order_id));
+    const openingRows = standing
+      .filter((o) => Number(o.credit_balance) > 0.004 && !withLog.has(o.id))
+      .map((o) => ({ standing_order_id: o.id, entry_date: todayISO(), amount: Number(o.credit_balance), text: "Guthaben-Stand zu Beginn des Verlaufs (frühere Bewegungen nicht erfasst)" }));
+    if (openingRows.length > 0) await supabase.from("standing_order_log").insert(openingRows);
+
     const activeRecurring = recurring.filter((r) => r.active);
     const activeStanding = standing.filter((s) => s.active);
     if (activeRecurring.length > 0) {
@@ -433,7 +442,7 @@ export default function Finanzen({ user, isAdmin }) {
             <div style={{ marginTop: 10 }}>
               {standingLog.length === 0 && (
                 <div style={{ fontSize: 12, color: COLOR.inkSoft, marginBottom: 8 }}>
-                  Noch nichts erfasst – ab jetzt wird jede Gutschrift und jede Verrechnung automatisch mitgeschrieben. Frühere Bewegungen (z. B. die ursprüngliche Einzahlung) kannst du unten nachtragen.
+                  Noch nichts erfasst – ab jetzt wird jede Gutschrift und jede Verrechnung automatisch mitgeschrieben. Frühere Bewegungen (z. B. die ursprüngliche Einzahlung) kannst du unten nachtragen, einzelne Einträge lassen sich mit dem Papierkorb löschen.
                 </div>
               )}
               {standingLog.map((l) => {
@@ -444,9 +453,15 @@ export default function Finanzen({ user, isAdmin }) {
                       <div>{l.text}</div>
                       <div style={{ color: COLOR.inkSoft, fontSize: 11.5 }}>{fmtDate(l.entry_date)}{o ? ` · aus Guthaben ${o.payer} → ${o.payee}` : ""}</div>
                     </div>
-                    <strong style={{ color: Number(l.amount) >= 0 ? COLOR.erledigt : COLOR.dringend, whiteSpace: "nowrap" }}>
-                      {Number(l.amount) >= 0 ? "+" : "−"}{Math.abs(Number(l.amount)).toFixed(2)} €
-                    </strong>
+                    <div style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
+                      <strong style={{ color: Number(l.amount) >= 0 ? COLOR.erledigt : COLOR.dringend, whiteSpace: "nowrap" }}>
+                        {Number(l.amount) >= 0 ? "+" : "−"}{Math.abs(Number(l.amount)).toFixed(2)} €
+                      </strong>
+                      <button onClick={async () => { await supabase.from("standing_order_log").delete().eq("id", l.id); load(); }} title="Eintrag löschen"
+                        style={{ background: "none", border: "none", cursor: "pointer", color: COLOR.inkSoft, padding: 0 }}>
+                        <Trash2 size={12} />
+                      </button>
+                    </div>
                   </div>
                 );
               })}
